@@ -1,0 +1,37 @@
+TeddyClip
+Copyright (C) 2026 Westley Smith
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See LICENSE.
+
+Third-party code and data
+-------------------------
+
+Clips Kitty (formerly Clips Studio)
+  https://github.com/ColinGPT9/clips-studio
+  Copyright (C) 2026 ColinGPT9
+  License: AGPL-3.0-or-later
+  Parts of TeddyClip's audio signals, transcription, encoding, screen-text
+  detection, moment selection and chapter code are adapted from Clips Kitty.
+  Files containing adapted code say so in their header.
+
+PANNs (Pretrained Audio Neural Networks)
+  https://github.com/qiuqiangkong/panns_inference
+  Copyright (c) 2018-2020 Qiuqiang Kong
+  License: MIT
+  Model weights (MobileNetV1, https://zenodo.org/records/3987831) are
+  CC BY 4.0 and are downloaded at runtime, not distributed with TeddyClip.
+
+AudioSet ontology labels
+  https://research.google.com/audioset/
+  Google, CC BY 4.0. Downloaded at runtime.
+
+faster-whisper
+  https://github.com/SYSTRAN/faster-whisper
+  License: MIT. Used as a dependency.
+
+RapidOCR
+  https://github.com/RapidAI/RapidOCR
+  License: Apache-2.0. Used as a dependency.

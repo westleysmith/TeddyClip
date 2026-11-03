@@ -14,9 +14,9 @@ TeddyClip is a personal auto-clipper for long gaming recordings with commentary.
    - Optional [OBS](https://obsproject.com/) chapter-marker hotkey as a clip button.
    - Loudness spikes, bursts of shouting or laughing, and quiet-then-loud reactions.
    - Optional per-game screen detectors (for example a "YOU DIED" screen).
-3. **Pick moments** by sending the transcript and signal timeline to an LLM, which returns candidate clips with titles and reasons.
-4. **Review** the candidate list, keep or drop each one, and adjust times.
-5. **Render** 16:9 clips and a highlight video with chapter timestamps, using NVIDIA NVENC when available.
+3. **Pick moments** with a small local AI model (via Ollama) that finds quiet jokes in the transcript and titles each moment. No cloud, no cost.
+4. **Cut clips** named by timestamp and what happened, plus DaVinci Resolve markers and chapters on the original recording.
+5. **Review** by deleting the clips you don't want, then build a highlight video with YouTube chapters. NVIDIA NVENC is used when available.
 
 ## Roadmap
 
@@ -26,6 +26,12 @@ TeddyClip is a personal auto-clipper for long gaming recordings with commentary.
 - More per-game detectors
 - Compilations ("died to this boss 12 times, then won")
 
+## Built on
+
+TeddyClip adapts code from [Clips Kitty](https://github.com/ColinGPT9/clips-studio), a full-featured open-source clipper by ColinGPT9, and trims it down to one job: long couch co-op recordings in, clips and editor markers out. It also uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [PANNs](https://github.com/qiuqiangkong/panns_inference), [RapidOCR](https://github.com/RapidAI/RapidOCR), [Ollama](https://ollama.com) and [FFmpeg](https://ffmpeg.org). See [NOTICE](NOTICE) for details.
+
+The full design is in [docs/design.md](docs/design.md).
+
 ## License
 
-[MIT](LICENSE)
+[AGPL-3.0-or-later](LICENSE)
