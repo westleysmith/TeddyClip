@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "teddyclip"
+version = "0.1.0"
+description = "Turn long OBS gameplay recordings into clips and highlights"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+    "faster-whisper",
+    "numpy",
+    "pyyaml",
+    "requests",
+    "torch",
+    "rapidocr-onnxruntime",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+teddyclip = "teddyclip.cli:main"
+
+[tool.setuptools]
+packages = ["teddyclip"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not slow'"
+markers = ["slow: needs GPU, network, Ollama or model weights"]
+testpaths = ["tests"]

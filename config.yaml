@@ -1,0 +1,26 @@
+root: C:\Users\{user}\TeddyClip
+people: [Teddy, Friend]            # used in titles
+triggers: ["clip that", "clip it", "clip this"]
+audio_track: null                  # e.g. 2 if mics are on their own OBS track
+whisper_model: auto                # large-v3-turbo on GPU, small on CPU
+llm:
+  model: qwen3:4b                  # or "none"; final choice after testing
+  url: http://127.0.0.1:11434
+clips:
+  min_seconds: 20
+  max_seconds: 120
+  max_clips: 40
+  pre_trigger_seconds: 45
+weights: {laughter: 1.0, joke_sweep: 0.7, loudness: 0.6, voice_jump: 0.6, screen_text: 0.6}
+games:
+  elden ring: soulslike
+  dark souls: soulslike
+  gta: sandbox
+  counter strike: shooter
+  red dead: sandbox
+lexicons:                           # trimmed to English
+  soulslike: ["YOU DIED", "ENEMY FELLED", "GREAT ENEMY FELLED", "DEMIGOD FELLED", "VICTORY ACHIEVED", "HEIR OF FIRE DESTROYED"]
+  sandbox: ["WASTED", "BUSTED", "MISSION PASSED", "MISSION FAILED"]
+  shooter: ["ROUND WON", "ROUND LOST", "ACE", "BOMB PLANTED", "BOMB DEFUSED"]
+resolve:
+  timeline_start: "01:00:00:00"
