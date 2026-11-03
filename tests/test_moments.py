@@ -88,7 +88,31 @@ def test_merge_on_text_similarity():
             Segment(100, 130, "he walked right off the cliff again", [])]
     a, b = Moment(0, 30, 5, "loud"), Moment(100, 130, 4, "joke")
     assert len(merge([a, b], [])) == 2  # no transcript, no text rule
-    assert len(merge([a, b], segs)) == 1
+    out = merge([a, b], segs)
+    # far apart: the better one is kept as it is, the span is not stretched over both
+    assert len(out) == 1
+    assert (out[0].kind, out[0].start, out[0].end, out[0].score) == ("joke", 100, 130, 4)
+
+
+def test_text_match_far_apart_keeps_trigger_not_the_span():
+    segs = [Segment(0, 30, "he walked right off the cliff again", []),
+            Segment(5000, 5030, "he walked right off the cliff again", [])]
+    out = merge([Moment(0, 30, 9, "loud"), Moment(5000, 5030, 3, "trigger")], segs)
+    assert len(out) == 1
+    assert (out[0].kind, out[0].start, out[0].end) == ("trigger", 5000, 5030)
+
+
+def test_text_match_same_kind_keeps_higher_score():
+    segs = [Segment(0, 30, "he walked right off the cliff again", []),
+            Segment(500, 530, "he walked right off the cliff again", [])]
+    out = merge([Moment(0, 30, 4, "loud"), Moment(500, 530, 7, "loud")], segs)
+    assert [(m.start, m.score) for m in out] == [(500, 7)]
+
+
+def test_text_match_between_two_forced_keeps_both():
+    segs = [Segment(0, 30, "clip that he walked off", []), Segment(500, 530, "clip that he walked off", [])]
+    out = merge([Moment(0, 30, 10, "trigger"), Moment(500, 530, 10, "marker")], segs)
+    assert [(m.start, m.end) for m in out] == [(0, 30), (500, 530)]
 
 
 def test_merge_different_text_does_not_merge():
@@ -142,11 +166,21 @@ def test_snap_extends_short_moments_to_min():
     assert m.duration >= 20 - 1e-9
 
 
-def test_snap_forced_only_clamps_start():
+def test_snap_forced_keeps_end_never_grows_and_caps_length():
     m = snap(Moment(-5, 12.5, 10, "trigger"), SEGS, 20, 120)
     assert (m.start, m.end) == (0, 12.5)
     m = snap(Moment(0, 300, 10, "marker"), SEGS, 20, 120)
-    assert (m.start, m.end) == (0, 300)
+    assert (m.start, m.end) == (180, 300)
+    m = snap(Moment(55, 99.7, 10, "trigger"), SEGS, 20, 120)
+    assert (m.start, m.end) == (55, 99.7)
+
+
+def test_merged_close_triggers_then_snapped_stay_within_max():
+    merged = merge(forced_windows([100.0, 125.0, 150.0, 175.0, 200.0], "trigger"), segments=[])
+    assert len(merged) == 1 and merged[0].duration > 120
+    snapped = snap(merged[0], [], 20, 120)
+    assert snapped.duration == pytest.approx(120) and snapped.end == pytest.approx(199.7)
+    assert snapped.kind == "trigger"
 
 
 def test_snap_does_not_mutate_input():

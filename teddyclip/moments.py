@@ -188,9 +188,11 @@ def sweep(
 def snap(m: Moment, segments: list[Segment], min_s: float, max_s: float) -> Moment:
     """Start and end moved out to the segment boundaries around them, then the
     length clamped to min_s..max_s (cut or grown evenly on both sides). A forced
-    moment keeps its window: only a start below 0 is clamped."""
+    moment keeps its end (the trigger stays) and is never grown or snapped; its
+    start is clamped to 0 and to max_s before the end. Run snap after merge, so a
+    merged forced window is capped too."""
     if m.forced:
-        return replace(m, start=max(0.0, m.start), events=list(m.events))
+        return replace(m, start=max(0.0, m.start, m.end - max_s), events=list(m.events))
     start, end = m.start, m.end
     for s in segments:
         if s.start <= start < s.end:
@@ -211,23 +213,33 @@ def snap(m: Moment, segments: list[Segment], min_s: float, max_s: float) -> Mome
     return replace(m, start=max(0.0, start), end=end, events=list(m.events))
 
 
-def _same_moment(a: Moment, b: Moment, segments: list[Segment]) -> bool:
+def _match(a: Moment, b: Moment, segments: list[Segment]) -> str | None:
+    """"time" when the two overlap over 40 percent of the shorter, "text" when
+    they only say over 70 percent the same words, else None. Two forced moments
+    never match on text alone: each was asked for at its own time."""
     overlap = min(a.end, b.end) - max(a.start, b.start)
     shorter = min(a.duration, b.duration)
     if overlap > 0 and shorter > 0 and overlap / shorter > MAX_OVERLAP:
-        return True
-    if not segments:
-        return False
+        return "time"
+    if not segments or (a.forced and b.forced):
+        return None
     text_a, text_b = _text(a, segments), _text(b, segments)
     if not text_a or not text_b:
-        return False
+        return None
     matcher = SequenceMatcher(None, text_a, text_b)
     # The two cheap upper bounds rule out most pairs before the full ratio.
-    return (
+    if (
         matcher.real_quick_ratio() > MAX_TEXT_SIMILARITY
         and matcher.quick_ratio() > MAX_TEXT_SIMILARITY
         and matcher.ratio() > MAX_TEXT_SIMILARITY
-    )
+    ):
+        return "text"
+    return None
+
+
+def _better(a: Moment, b: Moment) -> Moment:
+    """The better kind (KINDS order), then the higher score; `a` on a tie."""
+    return b if (KINDS.index(b.kind), -b.score) < (KINDS.index(a.kind), -a.score) else a
 
 
 def _join(a: Moment, b: Moment) -> Moment:
@@ -247,18 +259,25 @@ def _join(a: Moment, b: Moment) -> Moment:
 
 
 def merge(moments: list[Moment], segments: list[Segment]) -> list[Moment]:
-    """Moments that overlap over 40 percent in time or say over 70 percent the
-    same words become one (repeated until nothing more merges). Returned by start."""
+    """Moments that overlap over 40 percent in time become one spanning both
+    (repeated until nothing more merges). Moments far apart that only say over
+    70 percent the same words are repeats: the better one is kept and the other
+    dropped (two forced moments are both kept). Returned by start. Merging can
+    lengthen a window, so run snap afterwards."""
     out: list[Moment] = []
     for m in sorted(moments, key=lambda m: m.start):
         m = replace(m, events=list(m.events))
         while True:
-            hit = next((o for o in out if _same_moment(o, m, segments)), None)
+            hit = next((o for o in out if _match(o, m, segments)), None)
             if hit is None:
+                out.append(m)
                 break
             out.remove(hit)
-            m = _join(hit, m)
-        out.append(m)
+            if _match(hit, m, segments) == "time":
+                m = _join(hit, m)
+            else:
+                out.append(_better(hit, m))
+                break
     return sorted(out, key=lambda m: m.start)
 
 
