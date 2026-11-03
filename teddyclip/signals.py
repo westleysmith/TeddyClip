@@ -7,6 +7,7 @@ Per-second audio features over a whole recording:
   burst     - density of sudden energy onsets within the second
   noisiness - zero-crossing rate (laughter and crowd noise score high)
 
+`people_sounds` adds laughter and shouts heard by a PANNs sound tagger.
 `fuse` turns several per-second signals into one 0..1 score and `peak_windows`
 picks the windows around its strongest, well-separated peaks.
 """
@@ -20,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from teddyclip.panns import GROUPS, SAMPLE_RATE as PANNS_RATE
 from teddyclip.transcribe import Word
 
 SAMPLE_RATE = 16000
@@ -207,3 +209,89 @@ def peak_windows(
         (max(0.0, t - pre), min(float(score.size), t + post), float(score[t]))
         for t in sorted(peaks)
     ]
+
+
+PEOPLE_CHUNK_SECONDS = 60  # read and tagged at a time: a 4 hour file never sits in memory
+PEOPLE_BASELINE = 90  # seconds either side that set a sound's usual level in this recording
+PEOPLE_MIN_PROB = 0.1  # below this the tagger isn't really hearing it
+PEOPLE_MIN_REF = 0.2  # "as strong as it gets" is never lower, so a quiet recording's loudest blip isn't a peak
+
+
+def _wav32k_chunks(wav32k: Path, seconds: int):
+    """Mono 32 kHz float32 audio from a 16-bit WAV, `seconds` at a time."""
+    with wave.open(str(wav32k), "rb") as f:
+        if f.getnchannels() != 1 or f.getsampwidth() != 2 or f.getframerate() != PANNS_RATE:
+            raise ValueError(
+                f"{wav32k} must be 32 kHz mono 16-bit PCM, got {f.getframerate()} Hz, "
+                f"{f.getnchannels()} channel(s), {8 * f.getsampwidth()}-bit"
+            )
+        while True:
+            raw = f.readframes(seconds * PANNS_RATE)
+            if not raw:
+                break
+            yield np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+
+
+def people_sounds(wav32k: Path, tagger) -> dict[str, np.ndarray]:
+    """Laughter and shouts heard in a 32 kHz mono 16-bit WAV: {"laughter",
+    "shout"} -> 0..1 per second.
+
+    For second s the tagger hears the 2 s around it, [s - 0.5, s + 1.5), and
+    a group's probability is its strongest class there. Each group is then
+    judged against its own level in this recording (its rolling 90 s median),
+    so a stream that is always a bit laughy needs a real burst to score. A
+    group none of whose classes are in `tagger.labels` stays at zero. Audio
+    shorter than one second yields empty arrays."""
+    names = {name: i for i, name in enumerate(tagger.labels)}
+    index = {g: [names[c] for c in classes if c in names] for g, classes in GROUPS.items()}
+
+    sr = PANNS_RATE
+    half, width = sr // 2, 2 * sr
+    heard: dict[str, list[np.ndarray]] = {g: [] for g in GROUPS}
+    # buf holds samples from absolute offset `start`; half a second of silence
+    # stands in before the start and after the end.
+    buf = np.zeros(half, dtype=np.float32)
+    start = -half
+    total = 0
+    s = 0
+
+    def run(windows: list[np.ndarray]) -> None:
+        if not windows:
+            return
+        probs = np.asarray(tagger.tag(np.stack(windows)))
+        for g, ix in index.items():
+            heard[g].append(probs[:, ix].max(axis=1) if ix else np.zeros(len(windows)))
+
+    for chunk in _wav32k_chunks(Path(wav32k), PEOPLE_CHUNK_SECONDS):
+        total += chunk.size
+        buf = np.concatenate([buf, chunk])
+        windows = []
+        while (s + 1) * sr + half <= start + buf.size:
+            a = s * sr - half - start
+            windows.append(buf[a:a + width])
+            s += 1
+        run(windows)
+        keep = s * sr - half - start
+        buf, start = buf[keep:], start + keep
+
+    seconds = total // sr
+    if seconds < 1:
+        return {g: np.zeros(0, dtype=np.float32) for g in GROUPS}
+    buf = np.concatenate([buf, np.zeros(width, dtype=np.float32)])
+    windows = []
+    while s < seconds:
+        a = s * sr - half - start
+        windows.append(buf[a:a + width])
+        s += 1
+    run(windows)
+    return {g: _people_strength(np.concatenate(v)[:seconds].astype(np.float32)) for g, v in heard.items()}
+
+
+def _people_strength(p: np.ndarray) -> np.ndarray:
+    """A sound group's probability per second as 0..1 against its own usual
+    level here: its loudest moments score 1, its usual level 0."""
+    level = _rolling_median(p, PEOPLE_BASELINE)
+    ref = max(float(np.percentile(p, 99.5)), PEOPLE_MIN_REF)
+    usual = float(np.median(p))
+    strength = np.clip((p - level) / max(ref - usual, 0.05), 0.0, 1.0) * (p >= PEOPLE_MIN_PROB)
+    return strength.astype(np.float32)
