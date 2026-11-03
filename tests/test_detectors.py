@@ -54,6 +54,14 @@ def test_screen_events_tags_moment(tiny_video):
     assert m.events == ["YOU DIED"] and m.kind == "game" and m.score > 5
 
 
+def test_screen_events_joins_words_ocr_split_into_boxes(tiny_video):
+    # Real RapidOCR on a YOU DIED banner returns "YOU" and "DIED" as separate boxes.
+    fake_ocr = lambda img: ([([[0, 0], [9, 0], [9, 40], [0, 40]], "YOU", 0.98),
+                             ([[20, 0], [29, 0], [29, 40], [20, 40]], "DIED", 0.99)], None)
+    m = screen_events(tiny_video, [Moment(1, 5, 10, "trigger")], Lexicon(["YOU DIED"]), ocr=fake_ocr)[0]
+    assert m.events == ["YOU DIED"] and m.kind == "trigger"
+
+
 def test_screen_events_keeps_kind_unless_loud_and_never_mutates(tiny_video):
     fake_ocr = lambda img: ([([[0, 0], [9, 0], [9, 40], [0, 40]], "YOU DIED", 0.9)], None)
     laugh = Moment(1, 5, 5, "laughter")

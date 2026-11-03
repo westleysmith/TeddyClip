@@ -125,7 +125,12 @@ def screen_events(video: Path, moments: list[Moment], lexicon: Lexicon, weight: 
         hits: list[str] = []
         for _t, frame in read_frames(video, plan[i]):
             result, _elapsed = ocr(_center(frame))
-            for text in banner_texts(result, frame.shape[0]):
+            texts = banner_texts(result, frame.shape[0])
+            # OCR often splits a banner into one box per word ("YOU", "DIED"),
+            # so the words of a frame are also matched as one line.
+            if len(texts) > 1:
+                texts.append(" ".join(texts))
+            for text in texts:
                 hits.extend(h for h in lexicon.find(text) if h not in hits)
         if not hits:
             out.append(replace(m, events=list(m.events)))
