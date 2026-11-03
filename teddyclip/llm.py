@@ -17,6 +17,7 @@ _TRIES = 3
 _PAUSE = 2.0  # seconds before the second try, twice that before the third
 _TIMEOUT = 120
 _TAGS_TIMEOUT = 5
+_GIVE_UP_AFTER = 3  # failed asks in a row before the client turns itself off
 
 
 def parse_json(text: str) -> dict | None:
@@ -40,15 +41,27 @@ def _same_model(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
+class _Problem:
+    """Why one request gave no answer. A refusal (a 4xx reply) is not retried."""
+
+    def __init__(self, text: str, refused: bool = False):
+        self.text = text
+        self.refused = refused
+
+
 class LLM:
     def __init__(self, url: str, model: str, cache: Path):
         self.url = url.rstrip("/")
         self.model = model
         self.cache = Path(cache)
+        self._failures = 0  # failed asks in a row
+        self._told = False  # the first problem has been printed
+        self._gave_up = False
 
     @property
     def enabled(self) -> bool:
-        return self.model != "none"
+        """False for model "none", and once Ollama has failed 3 asks in a row."""
+        return self.model != "none" and not self._gave_up
 
     def available(self) -> bool:
         """True when Ollama answers /api/tags and lists the configured model."""
@@ -64,12 +77,16 @@ class LLM:
 
     def ask(self, prompt: str, schema: dict) -> dict | None:
         """The model's JSON answer to `prompt`, held to `schema`. Cached; None
-        when disabled or when no attempt gave a readable answer (not cached)."""
+        when disabled or when no attempt gave a readable answer (not cached).
+
+        The first problem is printed once. After 3 failed asks in a row the
+        client turns itself off for the rest of the recording."""
         if not self.enabled:
             return None
         path = self._cache_path(prompt, schema)
         cached = self._read_cache(path)
         if cached is not None:
+            self._failures = 0
             return cached
 
         payload = {
@@ -80,29 +97,50 @@ class LLM:
             "think": False,
             "options": {"num_ctx": 8192, "temperature": 0.2},
         }
+        problem = None
         for attempt in range(1, _TRIES + 1):
             answer = self._try_once(payload)
-            if answer is _REFUSED:
-                return None  # asking again won't change a refusal
-            if answer is not None:
+            if isinstance(answer, dict):
+                self._failures = 0
                 self._write_cache(path, answer)
                 return answer
+            problem = answer
+            if problem.refused:
+                break  # asking again won't change a refusal
             if attempt < _TRIES:
                 time.sleep(_PAUSE * attempt)
+        self._failed(problem)
         return None
 
-    def _try_once(self, payload: dict):
-        """One request: the parsed answer, None when it failed in a way worth
-        asking again (connection, server error, unreadable answer), or _REFUSED."""
+    def _failed(self, problem: _Problem) -> None:
+        if not self._told:
+            self._told = True
+            print(f"  {problem.text}")
+        self._failures += 1
+        if self._failures >= _GIVE_UP_AFTER:
+            self._gave_up = True
+            print("  Ollama stopped answering: continuing without AI for this recording")
+
+    def _try_once(self, payload: dict) -> dict | _Problem:
+        """One request: the parsed answer, or the _Problem that stopped it."""
         try:
             response = requests.post(f"{self.url}/api/chat", json=payload, timeout=_TIMEOUT)
-            if 400 <= response.status_code < 500:
-                return _REFUSED
-            response.raise_for_status()
+        except Exception as e:
+            return _Problem(f"Ollama did not answer ({type(e).__name__}: {e})")
+        if 400 <= response.status_code < 500:
+            return _Problem(
+                f"Ollama refused the request ({response.status_code}): {_error_text(response)}", refused=True
+            )
+        if response.status_code >= 500:
+            return _Problem(f"Ollama had a server error ({response.status_code}): {_error_text(response)}")
+        try:
             content = response.json()["message"]["content"]
         except Exception:
-            return None
-        return parse_json(content)
+            return _Problem("Ollama sent a reply TeddyClip could not read")
+        answer = parse_json(content)
+        if answer is None:
+            return _Problem("Ollama's answer was not the JSON TeddyClip asked for")
+        return answer
 
     def _cache_path(self, prompt: str, schema: dict) -> Path:
         key = hashlib.sha1((self.model + prompt + json.dumps(schema)).encode("utf-8")).hexdigest()
@@ -131,4 +169,13 @@ class LLM:
             pass
 
 
-_REFUSED = object()
+def _error_text(response) -> str:
+    """Ollama's own error message from a failed reply, kept short."""
+    try:
+        data = response.json()
+        text = data.get("error") if isinstance(data, dict) else None
+    except Exception:
+        text = None
+    if not text:
+        text = getattr(response, "text", "") or "no details"
+    return " ".join(str(text).split())[:300]

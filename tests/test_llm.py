@@ -181,3 +181,71 @@ def test_available_false_on_connection_error(tmp_path, monkeypatch):
 def test_available_false_on_http_error(tmp_path, monkeypatch):
     monkeypatch.setattr(requests, "get", lambda url, timeout: FakeResp({}, status_code=500))
     assert not LLM("http://x", "m", tmp_path).available()
+
+
+# telling the user once, and giving up on a server that stopped answering
+
+def test_first_refusal_is_printed_once_with_the_server_text(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResp({"error": "model 'm' not found"}, status_code=404))
+    llm = LLM("http://x", "m", tmp_path)
+    assert llm.ask("p1", {}) is None
+    assert llm.ask("p2", {}) is None
+    out = capsys.readouterr().out
+    assert out.count("model 'm' not found") == 1
+    assert "404" in out
+
+
+def test_first_failure_is_printed_once(tmp_path, monkeypatch, capsys):
+    def post(*a, **k):
+        raise requests.ConnectionError("refused to connect")
+
+    monkeypatch.setattr(requests, "post", post)
+    llm = LLM("http://x", "m", tmp_path)
+    llm.ask("p1", {})
+    llm.ask("p2", {})
+    out = capsys.readouterr().out
+    assert out.count("refused to connect") == 1
+
+
+def test_three_failed_asks_in_a_row_turn_the_client_off(tmp_path, monkeypatch, capsys):
+    calls = []
+
+    def post(*a, **k):
+        calls.append(1)
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(requests, "post", post)
+    llm = LLM("http://x", "m", tmp_path)
+    for n in range(3):
+        assert llm.enabled
+        assert llm.ask(f"p{n}", {}) is None
+    assert not llm.enabled
+    assert "Ollama stopped answering: continuing without AI for this recording" in capsys.readouterr().out
+    before = len(calls)
+    assert llm.ask("p4", {}) is None
+    assert len(calls) == before   # no more requests
+
+
+def test_refusals_count_as_failed_asks(tmp_path, monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResp({"error": "bad"}, status_code=400))
+    llm = LLM("http://x", "m", tmp_path)
+    for n in range(3):
+        llm.ask(f"p{n}", {})
+    assert not llm.enabled
+
+
+def test_an_answer_resets_the_failure_count(tmp_path, monkeypatch):
+    replies = iter(["down", "down", '{"a": 1}', "down", "down"])
+
+    def post(*a, **k):
+        reply = next(replies)
+        if reply == "down":
+            raise requests.ConnectionError("down")
+        return FakeResp({"message": {"content": reply}})
+
+    monkeypatch.setattr(llm_mod, "_TRIES", 1)
+    monkeypatch.setattr(requests, "post", post)
+    llm = LLM("http://x", "m", tmp_path)
+    for n in range(5):
+        llm.ask(f"p{n}", {})
+    assert llm.enabled
