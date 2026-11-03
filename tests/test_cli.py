@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import time
 
 from conftest import stage_in_inbox
@@ -117,3 +118,33 @@ def test_highlight_joins_a_clip_folder(tiny_video, tmp_path):
     assert main(["--config", str(conf), "highlight", str(folder)]) == 0
     assert (root / "3 Highlights" / "2026-11-01 Elden Ring.mp4").exists()
     assert (root / "3 Highlights" / "2026-11-01 Elden Ring - chapters.txt").exists()
+
+
+def test_recording_without_sound_fails_plainly_and_leaves_no_cache(fake_pipeline, cfg, monkeypatch, capsys):
+    cfg.paths.ensure()
+    silent = cfg.paths.inbox / "silent.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=3",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(silent)],
+        check=True,
+    )
+    monkeypatch.setattr(cli, "is_finished", lambda p, **k: True)
+    assert process_inbox(cfg) == 1
+    assert "no sound track" in capsys.readouterr().out
+    assert silent.exists()
+    assert not [p for p in cfg.paths.cache.iterdir() if p.name.startswith("silent.mp4")]
+
+
+def test_process_outside_the_inbox_keeps_the_original(fake_pipeline, tiny_video, cfg, tmp_path):
+    fake_pipeline(trigger_at=8.0)
+    elsewhere = tmp_path / "Recordings"
+    elsewhere.mkdir()
+    src = elsewhere / "session.mp4"
+    shutil.copy2(tiny_video, src)
+    date = time.strftime("%Y-%m-%d", time.localtime(src.stat().st_mtime))
+    conf = tmp_path / "config.yaml"
+    conf.write_text(f"root: '{cfg.root}'\n", encoding="utf-8")
+    assert main(["--config", str(conf), "process", str(src)]) == 0
+    assert src.exists()
+    assert (cfg.paths.done / f"{date} session.mp4").exists()
+    assert any("Clip that" in p.name for p in (cfg.paths.clips / f"{date} session").glob("*.mp4"))

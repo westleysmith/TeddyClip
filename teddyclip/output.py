@@ -268,10 +268,12 @@ def build_highlight(clip_dir: Path, video_out: Path, chapters_out: Path) -> Path
 # archive
 
 
-def archive_original(src: Path, done_dir: Path, moments: list[Moment], name: str) -> Path:
+def archive_original(src: Path, done_dir: Path, moments: list[Moment], name: str,
+                     keep_source: bool = False) -> Path:
     """Remux `src` into `done_dir/<name><src extension>` with the kept moments as
-    chapters, check the copy is as long as the original, then delete `src`.
-    On any failure the partial output is removed and `src` is left alone."""
+    chapters, check the copy is as long as the original, then delete `src`
+    (unless `keep_source`). On any failure the partial output is removed and
+    `src` is left alone."""
     src, done_dir = Path(src), Path(done_dir)
     dst = done_dir / f"{name}{src.suffix or '.mp4'}"
     if dst.exists():
@@ -290,7 +292,8 @@ def archive_original(src: Path, done_dir: Path, moments: list[Moment], name: str
                 f"The archived copy's duration ({got:.1f} s) does not match the original ({want:.1f} s), "
                 "so the original was kept."
             )
-        src.unlink()
+        if not keep_source:
+            src.unlink()
     except BaseException:
         dst.unlink(missing_ok=True)
         raise

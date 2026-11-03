@@ -333,6 +333,13 @@ def test_archive_moves_source_into_done_with_chapters(tiny_video, tmp_path):
     assert [round(c.start, 2) for c in info.chapters] == [0, 2, 6]
 
 
+def test_archive_can_keep_the_source(tiny_video, tmp_path):
+    ms = [Moment(2, 5, 9, "trigger", title="Boss", keep=True)]
+    dst = archive_original(tiny_video, tmp_path / "Done", ms, "session", keep_source=True)
+    assert tiny_video.exists() and dst.is_file()
+    assert [c.title for c in media.probe(dst).chapters] == ["Start", "Boss"]
+
+
 def test_archive_adds_no_start_chapter_when_first_moment_starts_at_zero(tiny_video, tmp_path):
     ms = [Moment(0, 3, 9, "trigger", title="Boss", keep=True), Moment(6, 9, 8, "marker", title="Hotkey", keep=True)]
     dst = archive_original(tiny_video, tmp_path / "Done", ms, "session")

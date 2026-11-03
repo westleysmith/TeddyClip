@@ -57,13 +57,33 @@ def test_merge_prefers_higher_priority_kind():
     assert out[0].score == 6 and (out[0].start, out[0].end) == (10, 45)
 
 
-def test_merge_forced_with_other_keeps_forced_kind_and_covers_both():
+def test_merge_forced_with_other_keeps_forced_kind_and_end():
     t = Moment(100, 144.7, 10, "trigger")
     o = Moment(120, 170, 8, "laughter", events=["YOU DIED"])
     out = merge([o, t], [])
     assert len(out) == 1
-    assert out[0].kind == "trigger" and (out[0].start, out[0].end) == (100, 170)
+    assert out[0].kind == "trigger" and (out[0].start, out[0].end) == (100, 144.7)
     assert out[0].events == ["YOU DIED"]
+
+
+def test_merge_never_runs_past_the_trigger_phrase():
+    # [90, 130] overlaps only 24 percent of the shorter window, so [75, 130] is used to make them merge.
+    t = forced_windows([100.0], "trigger")[0]
+    out = merge([t, Moment(75, 130, 9, "loud")], [])
+    assert len(out) == 1 and out[0].kind == "trigger"
+    assert (out[0].start, out[0].end) == (55, pytest.approx(99.7))
+
+
+def test_merge_forced_takes_earlier_start_from_other():
+    t = Moment(60, 104.7, 10, "marker")
+    out = merge([Moment(50, 90, 9, "laughter"), t], [])
+    assert len(out) == 1 and out[0].kind == "marker" and (out[0].start, out[0].end) == (50, 104.7)
+
+
+def test_two_triggers_merged_with_loud_end_at_the_later_trigger():
+    out = merge(forced_windows([100.0, 110.0], "trigger") + [Moment(80, 140, 9, "loud")], [])
+    assert len(out) == 1 and out[0].kind == "trigger"
+    assert (out[0].start, out[0].end) == (55, pytest.approx(109.7))
 
 
 def test_merge_unions_events_without_duplicates():

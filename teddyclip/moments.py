@@ -243,12 +243,15 @@ def _better(a: Moment, b: Moment) -> Moment:
 
 
 def _join(a: Moment, b: Moment) -> Moment:
-    """One moment covering both: the better kind (and its words), the best score."""
+    """One moment from the earlier start: the better kind (and its words), the
+    best score. It ends at the later end, or, when either is forced, at the
+    later forced end, so the clip still stops before "clip that" is said."""
     first, second = (a, b) if KINDS.index(a.kind) <= KINDS.index(b.kind) else (b, a)
     events = list(a.events) + [e for e in b.events if e not in a.events]
+    forced = [m for m in (a, b) if m.forced]
     return Moment(
         start=min(a.start, b.start),
-        end=max(a.end, b.end),
+        end=max(m.end for m in forced or (a, b)),
         score=max(a.score, b.score),
         kind=first.kind,
         title=first.title or second.title,
@@ -260,7 +263,8 @@ def _join(a: Moment, b: Moment) -> Moment:
 
 def merge(moments: list[Moment], segments: list[Segment]) -> list[Moment]:
     """Moments that overlap over 40 percent in time become one spanning both
-    (repeated until nothing more merges). Moments far apart that only say over
+    (repeated until nothing more merges), except that a merge holding a forced
+    moment ends at the latest forced end, never past the trigger. Moments far apart that only say over
     70 percent the same words are repeats: the better one is kept and the other
     dropped (two forced moments are both kept). Returned by start. Merging can
     lengthen a window, so run snap afterwards."""

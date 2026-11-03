@@ -114,6 +114,10 @@ def _folder_name(path: Path, cfg: Config, mtime: float) -> str:
     return name
 
 
+def _in_inbox(path: Path, cfg: Config) -> bool:
+    return Path(path).resolve().is_relative_to(cfg.paths.inbox.resolve())
+
+
 def _count(n: int, thing: str) -> str:
     return f"{n} {thing}" if n == 1 else f"{n} {thing}s"
 
@@ -129,7 +133,8 @@ def _highest(*signals: np.ndarray) -> np.ndarray:
 def process_recording(path: Path, cfg: Config) -> Path:
     """Find the moments in one recording, cut them into a clip folder with
     moments.csv and Resolve markers, and move the original into Done with
-    chapters. Returns the clip folder."""
+    chapters. A recording from outside the inbox is copied there instead and
+    left where it is. Returns the clip folder."""
     path = Path(path)
     paths = cfg.paths
     paths.ensure()
@@ -139,7 +144,12 @@ def process_recording(path: Path, cfg: Config) -> Path:
     print(f"\nProcessing {path.name} into \"{name}\"")
 
     info = probe(path)
-    cache = paths.cache / f"{path.name}-{stat.st_size}-{int(stat.st_mtime)}"
+    if info.audio_tracks == 0:
+        raise RuntimeError(
+            f"{path.name} has no sound track. "
+            "Check OBS Settings > Output > Recording > Audio Track, then record again."
+        )
+    cache =paths.cache / f"{path.name}-{stat.st_size}-{int(stat.st_mtime)}"
     print("Extracting audio...")
     wav16 = extract_audio(path, cache / "audio16k.wav", WHISPER_RATE, cfg.audio_track)
     wav32 = extract_audio(path, cache / "audio32k.wav", PANNS_RATE, cfg.audio_track)
@@ -203,8 +213,12 @@ def process_recording(path: Path, cfg: Config) -> Path:
     write_moments_csv(moments, out_dir / "moments.csv")
     write_resolve_edl(moments, out_dir / "Resolve markers.edl", info.fps, cfg.resolve_timeline_start, name)
 
-    print("Moving the original to Done...")
-    archive_original(path, paths.done, moments, name)
+    if _in_inbox(path, cfg):
+        print("Moving the original to Done...")
+        archive_original(path, paths.done, moments, name)
+    else:
+        print("Copying the original into Done (it is outside the inbox, so it stays where it is)...")
+        archive_original(path, paths.done, moments, name, keep_source=True)
     # The transcript and AI answers stay cached; the audio is only needed again
     # if the recording is processed again, and costs over 1 GB per 4 hours.
     for wav in (wav16, wav32):
