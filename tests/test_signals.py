@@ -3,7 +3,7 @@ import wave
 import numpy as np
 import pytest
 
-from teddyclip.signals import audio_features, find_triggers, fuse, pct, peak_windows, voice_jump
+from teddyclip.signals import audio_features, contributions, find_triggers, fuse, pct, peak_windows, voice_jump
 from teddyclip.transcribe import Word
 
 
@@ -80,6 +80,17 @@ def test_fuse_pads_to_longest_and_ignores_unweighted_signals():
     assert fuse({"a": np.array([0., 1.])}, {}).tolist() == [0.0, 0.0]
 
 
+def test_contributions_are_what_fuse_combines():
+    signals = {"a": np.array([0, 0, 10, 0.]), "b": np.array([0, 5, 0, 0.]), "c": np.array([1., 2.])}
+    weights = {"a": 1.0, "b": 0.5, "c": 2.0}
+    parts = contributions(signals, weights)
+    assert set(parts) == {"a", "b", "c"} and all(p.size == 4 for p in parts.values())
+    assert parts["b"].tolist() == pytest.approx([0, 0.5, 0, 0])
+    assert parts["c"].tolist() == pytest.approx([0, 1.0, 0, 0])   # weight clipped to 1, padded with zeros
+    expected = 1 - np.prod([1 - p for p in parts.values()], axis=0)
+    assert fuse(signals, weights) == pytest.approx(expected)
+
+
 def test_peak_windows_clamp_and_spacing():
     s = np.zeros(300)
     s[5] = 1
@@ -87,13 +98,14 @@ def test_peak_windows_clamp_and_spacing():
     s[160] = 0.9
     wins = peak_windows(s, percentile=90)
     assert wins[0][0] == 0 and len(wins) == 2
-    assert wins[1] == (130.0, 165.0, 1.0)
+    assert wins[0][3] == 5.0
+    assert wins[1] == (130.0, 165.0, 1.0, 150.0)
 
 
 def test_peak_windows_clamps_end_and_needs_a_positive_peak():
     s = np.zeros(100)
     s[95] = 1
-    assert peak_windows(s) == [(75.0, 100.0, 1.0)]
+    assert peak_windows(s) == [(75.0, 100.0, 1.0, 95.0)]
     assert peak_windows(np.zeros(100)) == []
 
 

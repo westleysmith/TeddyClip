@@ -142,27 +142,71 @@ def test_merge_different_text_does_not_merge():
 
 # signal windows
 
-def test_signal_windows_kind_is_strongest_signal():
+def test_signal_windows_kind_is_the_strongest_contribution_at_the_peak():
     n = 100
-    laugh = np.zeros(n)
-    joke = np.zeros(n)
-    loud = np.zeros(n)
-    loud[50] = 0.9
-    laugh[52] = 0.4
-    out = signal_windows([(30.0, 65.0, 0.8)], {"laughter": laugh, "joke": joke, "loud": loud})
+    laugh, joke, loud = np.zeros(n), np.zeros(n), np.zeros(n)
+    loud[50] = 0.9    # stronger, but not at the peak
+    laugh[40] = 0.5
+    loud[40] = 0.2
+    out = signal_windows([(20.0, 55.0, 0.8, 40.0)], {"laughter": laugh, "joke": joke, "loud": loud})
     assert len(out) == 1
     m = out[0]
-    assert m.kind == "loud" and m.score == pytest.approx(8.0) and (m.start, m.end) == (30.0, 65.0)
-    laugh[40] = 0.95
-    assert signal_windows([(30.0, 65.0, 0.8)], {"laughter": laugh, "loud": loud})[0].kind == "laughter"
+    assert m.kind == "laughter" and m.score == pytest.approx(8.0) and (m.start, m.end) == (20.0, 55.0)
+    loud[40] = 0.6
+    assert signal_windows([(20.0, 55.0, 0.8, 40.0)], {"laughter": laugh, "loud": loud})[0].kind == "loud"
 
 
 def test_signal_windows_tie_goes_to_priority_and_missing_signals_default_to_loud():
     a = np.zeros(100)
     b = np.zeros(100)
     a[40] = b[40] = 0.5
-    assert signal_windows([(30.0, 65.0, 0.5)], {"joke": a, "laughter": b})[0].kind == "laughter"
-    assert signal_windows([(30.0, 65.0, 0.5)], {})[0].kind == "loud"
+    assert signal_windows([(30.0, 65.0, 0.5, 40.0)], {"joke": a, "laughter": b})[0].kind == "laughter"
+    assert signal_windows([(30.0, 65.0, 0.5, 40.0)], {})[0].kind == "loud"
+    assert signal_windows([(30.0, 65.0, 0.5, 40.0)], {"joke": np.zeros(10)})[0].kind == "loud"
+
+
+def _kinds_from(signals, weights):
+    """What cli.py hands signal_windows: each signal's weighted share of the fused score."""
+    from teddyclip.signals import contributions
+
+    parts = contributions(signals, weights)
+    return {"laughter": parts["laughter"], "joke": parts["joke_sweep"],
+            "loud": np.maximum(parts["loudness"], parts["voice_jump"])}
+
+
+WEIGHTS = {"laughter": 1.0, "joke_sweep": 0.7, "loudness": 0.6, "voice_jump": 0.6}
+
+
+def test_laughter_wins_when_it_is_the_strongest_weighted_signal_at_the_peak():
+    from teddyclip.signals import fuse, peak_windows
+
+    n = 200
+    rng = np.random.default_rng(1)
+    signals = {
+        "laughter": np.zeros(n), "joke_sweep": np.zeros(n),
+        "loudness": rng.random(n) * 0.5, "voice_jump": np.zeros(n),
+    }
+    signals["laughter"][100] = 1.0       # the big laugh
+    signals["loudness"][100] = 0.45      # fairly loud too, but only a middling second for loudness
+    signals["loudness"][110] = 0.9       # the loudest second, later in the same window
+    peaks = peak_windows(fuse(signals, WEIGHTS), percentile=99)
+    peak = next(p for p in peaks if p[0] <= 100 <= p[1])
+    assert peak[3] == 100.0
+    (m,) = signal_windows([peak], _kinds_from(signals, WEIGHTS))
+    assert m.kind == "laughter"
+
+
+def test_joke_wins_when_it_is_the_strongest_weighted_signal_at_the_peak():
+    n = 200
+    signals = {
+        "laughter": np.zeros(n), "joke_sweep": np.zeros(n),
+        "loudness": np.linspace(0, 1, n), "voice_jump": np.zeros(n),
+    }
+    signals["joke_sweep"][60:120] = 0.8   # a funny slice
+    signals["laughter"][95] = 1.0          # a laugh nearby, not at the peak
+    signals["loudness"][90] = 0.0          # quiet at the peak
+    (m,) = signal_windows([(70.0, 105.0, 0.7, 90.0)], _kinds_from(signals, WEIGHTS))
+    assert m.kind == "joke"
 
 
 # snap

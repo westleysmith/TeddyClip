@@ -40,6 +40,7 @@ from teddyclip.panns import LABELS_NAME, SAMPLE_RATE as PANNS_RATE, WEIGHTS_NAME
 from teddyclip.signals import (
     SAMPLE_RATE as WHISPER_RATE,
     audio_features,
+    contributions,
     find_triggers,
     fuse,
     pct,
@@ -176,10 +177,10 @@ def process_recording(path: Path, cfg: Config) -> Path:
     jokes = sweep(segments, llm, load_prompt("sweep"))
 
     spike = pct(features["spike"])
-    fused = fuse(
-        {"laughter": laughter, "joke_sweep": jokes, "loudness": _highest(spike, pct(shout)), "voice_jump": jumps},
-        cfg.weights,
-    )
+    fusing = {"laughter": laughter, "joke_sweep": jokes, "loudness": _highest(spike, pct(shout)), "voice_jump": jumps}
+    fused = fuse(fusing, cfg.weights)
+    # What each signal added to the fused score, to name the kind of each peak.
+    parts = contributions(fusing, cfg.weights)
     triggers = find_triggers(all_words(segments), cfg.triggers)
     if triggers:
         print(f"Heard \"clip that\" {_count(len(triggers), 'time')}")
@@ -188,7 +189,8 @@ def process_recording(path: Path, cfg: Config) -> Path:
         + forced_windows([c.start for c in info.chapters], "marker", pre=cfg.pre_trigger_seconds)
         + signal_windows(
             peak_windows(fused),
-            {"laughter": laughter, "joke": jokes, "loud": _highest(spike, pct(shout), jumps)},
+            {"laughter": parts["laughter"], "joke": parts["joke_sweep"],
+             "loud": _highest(parts["loudness"], parts["voice_jump"])},
         )
     )
 

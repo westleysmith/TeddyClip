@@ -127,22 +127,26 @@ def forced_windows(times: list[float], kind: str, pre: float = 45, gap: float = 
 
 
 def signal_windows(
-    peaks: list[tuple[float, float, float]],
-    signals: dict[str, np.ndarray],
+    peaks: list[tuple[float, float, float, float]],
+    contributions: dict[str, np.ndarray],
 ) -> list[Moment]:
-    """A moment per (start, end, peak) window. Its kind is the signal that is
-    strongest inside the window (earlier in KINDS wins a tie; "loud" when no
-    signal is given); its score is the peak times 10."""
+    """A moment per (start, end, peak score, peak second) window from
+    `signals.peak_windows`. Its kind is the signal that added the most to the
+    fused score at the peak second: `contributions` maps a kind ("laughter",
+    "joke", "loud") to its weighted share per second, the same quantities the
+    fused score was made of. Earlier in KINDS wins a tie; "loud" when no signal
+    is given. Its score is the peak times 10."""
     out = []
-    for start, end, peak in peaks:
-        lo, hi = max(0, int(start)), int(math.ceil(end))
-        kind, best = "loud", -math.inf
+    for start, end, peak, at in peaks:
+        second = int(at)
+        kind, best = "loud", 0.0
         for k in KINDS:
-            if k in FORCED_KINDS or k not in signals:
+            if k in FORCED_KINDS or k not in contributions:
                 continue
-            chunk = np.asarray(signals[k])[lo:hi]
-            if chunk.size and float(chunk.max()) > best:
-                kind, best = k, float(chunk.max())
+            values = np.asarray(contributions[k])
+            value = float(values[second]) if 0 <= second < values.size else 0.0
+            if value > best:
+                kind, best = k, value
         out.append(Moment(float(start), float(end), float(peak) * 10, kind))
     return out
 

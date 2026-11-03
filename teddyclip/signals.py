@@ -201,29 +201,33 @@ def pct(x: np.ndarray) -> np.ndarray:
     return (ranks / max(x.size - 1, 1)).astype(np.float32)
 
 
-def _soft_or(sources: list[tuple[np.ndarray, float]]) -> np.ndarray:
-    """Evidence from several independent sources, each 0..1 per second with
-    a trust weight: 1 - product(1 - w*s). Agreement raises it; a missing
-    source (an empty array) is simply absent, never a penalty."""
-    sources = [(s, w) for s, w in sources if s.size]
-    if not sources:
-        return np.zeros(0, dtype=np.float32)
-    n = max(s.size for s, _ in sources)
-    miss = np.ones(n, dtype=np.float32)
-    for sig, w in sources:
-        x = np.zeros(n, dtype=np.float32)
-        x[: sig.size] = np.clip(sig, 0.0, 1.0)
-        miss *= 1.0 - w * x
-    return (1.0 - miss).astype(np.float32)
+def contributions(signals: dict[str, np.ndarray], weights: dict[str, float]) -> dict[str, np.ndarray]:
+    """Each signal's share of the fused score, per second: its percentile rank
+    times its weight (clipped to 0..1). Every array is padded with zeros to the
+    longest; a signal without a weight is all zeros. These are exactly the
+    quantities `fuse` combines, so they also say which signal made a peak."""
+    parts = {name: np.clip(pct(sig), 0.0, 1.0) * float(np.clip(weights.get(name, 0.0), 0.0, 1.0))
+             for name, sig in signals.items()}
+    n = max((p.size for p in parts.values()), default=0)
+    out = {}
+    for name, part in parts.items():
+        padded = np.zeros(n, dtype=np.float32)
+        padded[: part.size] = part
+        out[name] = padded
+    return out
 
 
 def fuse(signals: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
-    """One 0..1 score per second: the soft OR of each signal's percentile rank
-    times its weight (clipped to 0..1). A signal without a weight counts for
-    nothing; shorter arrays are padded with zeros to the longest."""
-    sources = [(pct(sig), float(np.clip(weights.get(name, 0.0), 0.0, 1.0)))
-               for name, sig in signals.items()]
-    return _soft_or(sources)
+    """One 0..1 score per second: the soft OR, 1 - product(1 - c), of every
+    signal's contribution c (see `contributions`). Agreement raises it; a
+    missing signal (an empty array) is simply absent, never a penalty."""
+    parts = contributions(signals, weights)
+    if not parts or not next(iter(parts.values())).size:
+        return np.zeros(0, dtype=np.float32)
+    miss = np.ones(next(iter(parts.values())).size, dtype=np.float32)
+    for part in parts.values():
+        miss *= 1.0 - part
+    return (1.0 - miss).astype(np.float32)
 
 
 def peak_windows(
@@ -231,11 +235,11 @@ def peak_windows(
     percentile: float = 92,
     pre: float = 20,
     post: float = 15,
-) -> list[tuple[float, float, float]]:
-    """(start, end, peak score) of the window around each strong peak, in time
-    order. A peak must be above the percentile value and above 0; peaks are at
-    least `pre + post` seconds apart (the higher one wins), so no two windows
-    overlap. Windows are clamped to the video: 0 to len(score)."""
+) -> list[tuple[float, float, float, float]]:
+    """(start, end, peak score, peak second) of the window around each strong
+    peak, in time order. A peak must be above the percentile value and above 0;
+    peaks are at least `pre + post` seconds apart (the higher one wins), so no
+    two windows overlap. Windows are clamped to the video: 0 to len(score)."""
     score = np.asarray(score, dtype=np.float32)
     if score.size == 0:
         return []
@@ -249,7 +253,7 @@ def peak_windows(
         if all(abs(int(t) - p) >= spacing for p in peaks):
             peaks.append(int(t))
     return [
-        (max(0.0, t - pre), min(float(score.size), t + post), float(score[t]))
+        (max(0.0, t - pre), min(float(score.size), t + post), float(score[t]), float(t))
         for t in sorted(peaks)
     ]
 
