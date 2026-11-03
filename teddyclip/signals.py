@@ -119,28 +119,71 @@ def voice_jump(loudness: np.ndarray) -> np.ndarray:
     return (np.clip((ratio - 2.0) / 1.5, 0.0, 1.0) * audible).astype(np.float32)
 
 
+TRIGGER_MAX_PAUSE = 1.0  # seconds between one word of a trigger phrase and the next
+TRIGGER_FIRST_WORD_RATIO = 0.8
+_SENTENCE_END = re.compile(r"[.!?][\"')\]]*$")
+_PAST_TENSE = ("ped", "ed", "d", "t")
+
+
 def _normalize(text: str) -> str:
     return re.sub(r"[^\w\s]", "", text.lower()).strip()
 
 
-def find_triggers(words: list[Word], phrases: list[str], threshold: float = 0.8) -> list[float]:
+def _first_word_matches(heard: str, target: str, next_target: str | None) -> bool:
+    """Whether a heard word can be the first word of a trigger phrase.
+
+    The same word always counts. A misspelling counts when it is close
+    (difflib ratio >= 0.8, for example "cliip"), but an inflection of the word
+    does not: "clips that" and "clipping that" are ordinary talk. One mishear is
+    allowed on purpose: before a word starting with "th" Whisper often writes
+    "clip that" as "clipped that", because the p runs into the th. "clipped it"
+    has no such excuse and does not count."""
+    if heard == target:
+        return True
+    if heard.startswith(target):
+        rest = heard[len(target):]
+        return bool(next_target and next_target.startswith("th") and rest in _PAST_TENSE)
+    return difflib.SequenceMatcher(None, heard, target).ratio() >= TRIGGER_FIRST_WORD_RATIO
+
+
+def find_triggers(words: list[Word], phrases: list[str]) -> list[float]:
     """Start time of each place the player said one of `phrases`, such as
-    "clip that". Slides over word n-grams of each phrase's length and compares
-    lowercase, punctuation-stripped text, so "Clip that!" and a mis-heard
-    "clipped that" or "flip that" still match. A match within 5 s of the
+    "clip that", matched word by word on lowercase, punctuation-stripped text.
+
+    The first word may be a close misspelling (see `_first_word_matches`); every
+    later word must be exactly the phrase's word. The words must follow each
+    other with at most 1 s between one word's end and the next one's start, and
+    no word but the last may end a sentence (. ! or ?), so "...a clip. That
+    was..." is not a trigger; a comma is fine. A match within 5 s of the
     previous one is dropped."""
-    spoken = [(w.start, _normalize(w.text)) for w in words]
-    spoken = [(t, s) for t, s in spoken if s]
+    spoken: list[tuple[Word, str, bool]] = []  # (word, normalized text, ends a sentence)
+    for w in words:
+        text = _normalize(w.text)
+        ends = bool(_SENTENCE_END.search(w.text.strip()))
+        if text:
+            spoken.append((w, text, ends))
+        elif ends and spoken:
+            # Punctuation on its own still ends the sentence before it.
+            prev, prev_text, _ = spoken[-1]
+            spoken[-1] = (prev, prev_text, True)
+
     hits: list[float] = []
     for phrase in phrases:
-        target = _normalize(phrase)
-        n = len(target.split())
+        target = _normalize(phrase).split()
+        n = len(target)
         if n == 0:
             continue
         for i in range(len(spoken) - n + 1):
-            heard = " ".join(s for _, s in spoken[i:i + n])
-            if difflib.SequenceMatcher(None, heard, target).ratio() >= threshold:
-                hits.append(spoken[i][0])
+            run = spoken[i:i + n]
+            if not _first_word_matches(run[0][1], target[0], target[1] if n > 1 else None):
+                continue
+            if any(text != want for (_, text, _), want in zip(run[1:], target[1:])):
+                continue
+            if any(ends for _, _, ends in run[:-1]):
+                continue
+            if any(b.start - a.end > TRIGGER_MAX_PAUSE + 1e-6 for (a, _, _), (b, _, _) in zip(run, run[1:])):
+                continue
+            hits.append(run[0][0].start)
     triggers: list[float] = []
     for t in sorted(hits):
         if not triggers or t - triggers[-1] >= TRIGGER_GAP:
