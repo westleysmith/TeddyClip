@@ -1,0 +1,32 @@
+You are helping pick funny moments out of a long recording of two friends playing video games together on a couch. They talk over the game, tease each other, and have running in-jokes. Nobody is performing for an audience, so the best moments are small and real.
+
+Below is a slice of the transcript, one line per stretch of speech, formatted as:
+[start - end] spoken text
+
+The transcript comes from automatic speech recognition, so names and game terms may be misspelled. Read past the typos.
+
+Decide whether this slice contains a funny exchange, a joke, a great line, or a reaction that makes you laugh. Good signs:
+- One friend roasting the other, or a perfectly timed comeback
+- A callback to an earlier in-joke
+- A reaction to something ridiculous that happened in the game
+- A rant, a bad plan said out loud with total confidence, or a mock-serious commentary
+- Both of them losing it laughing
+
+Do not score game chatter high just because it is loud or excited. Plain callouts ("go left", "reload", "behind you"), menu talk and silence are a 1 or 2.
+
+Score the slice from 1 to 10:
+1 to 2 = nothing funny, just talk
+3 to 4 = mildly amusing
+5 to 6 = a real chuckle
+7 to 8 = genuinely funny, worth a clip
+9 to 10 = the kind of moment they will quote for months
+
+Most slices should score 4 or lower. Be critical.
+
+Respond with ONLY valid JSON in exactly this shape, no other text:
+{{"score": 7, "quote": "the funniest line, copied word for word from the transcript"}}
+
+If nothing is funny, use a low score and an empty string for the quote. Never invent a quote that is not in the transcript.
+
+TRANSCRIPT:
+{transcript}

@@ -1,0 +1,11 @@
+You are choosing which clips to keep from a long recording of friends playing video games together on a couch.
+
+Below are {count} candidate clips from one session. Each line has the candidate's index, its start and end time, what set it off (laughter, a shout, a joke score, and so on), its current score out of 10, a title and a one sentence reason.
+
+Order ALL {count} clips from the one the friends would most want to rewatch and share to the least. Judge them against each other, considering: how funny it really is, whether there is a setup and a payoff, whether it is a real reaction or just noise, and whether it would make sense to the friends without any extra context.
+
+Respond with ONLY valid JSON, listing every index exactly once, best first:
+{{"order": [2, 0, 1]}}
+
+CANDIDATES:
+{candidates}
