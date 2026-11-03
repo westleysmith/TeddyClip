@@ -47,7 +47,7 @@ from teddyclip.signals import (
     people_sounds,
     voice_jump,
 )
-from teddyclip.transcribe import all_words, cuda_usable, release, transcribe
+from teddyclip.transcribe import all_words, gpu_ready, release, transcribe
 
 VIDEO_SUFFIXES = {".mp4", ".mkv"}
 QUIET_SECONDS = 60
@@ -318,7 +318,7 @@ def check(cfg: Config) -> int:
         _line("fail", "ffmpeg not found: run 'winget install Gyan.FFmpeg', then open a new window (README step 2)")
         _line("info", "NVENC not checked, because it needs ffmpeg")
 
-    usable, reason = cuda_usable()
+    usable, reason = gpu_ready()
     if usable:
         _line("ok", f"CUDA for whisper: {reason}")
     else:

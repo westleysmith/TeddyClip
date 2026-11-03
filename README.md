@@ -41,12 +41,17 @@ An NVIDIA GPU makes it faster but is not required. Everything below is done once
    .venv\Scripts\pip install -e .
    ```
    If you installed a different Python version, change `-3.12` to match (3.11 or newer). The second command installs the small CPU build of PyTorch, which is all TeddyClip needs.
-6. **Check the setup:**
+6. **NVIDIA graphics card (for example an RTX 3060): add the GPU libraries.** Run this as an extra step:
+   ```
+   .venv\Scripts\pip install -e .[gpu]
+   ```
+   GPU transcription needs these libraries plus an up-to-date NVIDIA driver. Without them everything still works, but transcription runs on the CPU, which is slower. If you have no NVIDIA card, skip this step. (This has not yet been tested on a real GPU; the [real-footage checklist](docs/real-footage-checklist.md) covers confirming it.)
+7. **Check the setup:**
    ```
    .venv\Scripts\teddyclip check
    ```
-   It prints a list of `[ok]`, `[info]` and `[fail]` lines. Fix anything marked `[fail]` using the hint on that line, and run it again. If it says CUDA is unavailable, TeddyClip still works and transcribes on the CPU, just more slowly. GPU transcription needs an up-to-date NVIDIA driver.
-7. **Run it:** double-click `TeddyClip.bat`.
+   It prints a list of `[ok]`, `[info]` and `[fail]` lines. Fix anything marked `[fail]` using the hint on that line, and run it again. If it says whisper will use the CPU, TeddyClip still works, just more slowly; the line says why (for example the GPU libraries from step 6 are missing).
+8. **Run it:** double-click `TeddyClip.bat`.
 
 The first real run downloads the whisper speech model and the laughter and shout model (PANNs weights), so it takes longer and needs internet once. After that nothing is downloaded again.
 
@@ -79,7 +84,7 @@ TeddyClip\                            created on first run, default C:\Users\<yo
   .cache\                             transcripts, AI answers, model files
 ```
 
-- **Clips** are named `<hours>h<minutes>m<seconds>s - <title>.mp4` after where they start in the recording. Clips that came from "clip that" or an OBS marker have `Clip that - ` in front of the title.
+- **Clips** are named `<hours>h<minutes>m<seconds>s - <title>.mp4` after where they start in the recording. Clips that came from saying "clip that" have `Clip that - ` in front of the title. Clips from an OBS marker key have no prefix, but their `kind` in `moments.csv` is `marker`.
 - **`moments.csv`** lists every moment TeddyClip found, including the ones it did not turn into clips. Open it in Excel. The `keep` column says yes or no, `score` is how strong the moment is, `why` explains the pick, and `file` is the clip's file name. This is the place to look when a clip surprised you, or to find a good moment that was left out.
 - **`Resolve markers.edl`** puts every clip as a colored marker on your full recording in DaVinci Resolve (red for "clip that" and OBS markers, yellow for laughter, blue for jokes, purple for game screen text, green for loud moments). To use it, put the original recording from `Done` on a timeline starting at 01:00:00:00 (Resolve's default), then in the Media Pool right-click the timeline and choose Timelines > Import > Timeline Markers from EDL. The marker name is the clip title. The marker file has no room for the reason, so the reason is only in `moments.csv`.
 - **The original** is moved from the inbox to `Done` with chapters added, one per kept moment, so you can jump between them in a video player. It keeps its file type (an `.mkv` stays `.mkv`). The inbox copy is only removed once the new copy is checked to be the same length.
@@ -95,7 +100,7 @@ Everything works with no changes except the names. Open `config.yaml` in Notepad
 | `people` | The names used in clip titles. Change `Friend` to your friend's real name. |
 | `triggers` | The phrases that always make a clip. Add any variants the transcript mishears. |
 | `audio_track` | Which OBS audio track holds your microphones (for example `2`). Leave as `null` to use track 1. See the [OBS setup guide](docs/obs-setup.md). |
-| `whisper_model` | `auto` picks a large model on a GPU and a small one on the CPU. |
+| `whisper_model` | `auto` picks a large model on a GPU (with the GPU libraries installed) and a small one on the CPU. |
 | `llm: model` | The Ollama model for jokes and titles, or `none` to turn the AI off. |
 | `clips:` | `min_seconds` and `max_seconds` (clip length, default 20 to 120), `max_clips` (default 40), `pre_trigger_seconds` (how far back a "clip that" clip starts, default 45). |
 | `weights` | How much each signal counts: laughter, joke_sweep, loudness, voice_jump, screen_text. |

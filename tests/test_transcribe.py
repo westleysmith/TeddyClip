@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -135,3 +136,78 @@ def test_corrupt_cache_is_a_miss_and_gets_replaced(tmp_path, monkeypatch, bad):
     cached = json.loads((tmp_path / "transcript.json").read_text(encoding="utf-8"))
     assert cached[0]["text"] == "clip that"
     assert not (tmp_path / "transcript.json.tmp").exists()
+
+
+# GPU detection and the NVIDIA pip packages' DLL folders (no GPU needed)
+
+
+def _fake_ctranslate2(monkeypatch, count):
+    import ctranslate2
+
+    monkeypatch.setattr(ctranslate2, "get_cuda_device_count", lambda: count)
+
+
+def test_cuda_usable_is_false_without_a_gpu(monkeypatch):
+    _fake_ctranslate2(monkeypatch, 0)
+    usable, reason = transcribe_mod.cuda_usable()
+    assert usable is False
+    assert "no NVIDIA GPU" in reason
+
+
+def test_cuda_usable_is_true_with_a_gpu_and_ignores_torch(monkeypatch):
+    _fake_ctranslate2(monkeypatch, 1)
+    monkeypatch.setitem(__import__("sys").modules, "torch", None)  # a missing or CPU-only torch must not matter
+    usable, reason = transcribe_mod.cuda_usable()
+    assert usable is True
+    assert "NVIDIA GPU" in reason
+
+
+def test_cuda_usable_survives_a_failing_check(monkeypatch):
+    import ctranslate2
+
+    def boom():
+        raise RuntimeError("driver")
+
+    monkeypatch.setattr(ctranslate2, "get_cuda_device_count", boom)
+    usable, reason = transcribe_mod.cuda_usable()
+    assert usable is False
+    assert "RuntimeError" in reason
+
+
+def test_nvidia_bin_dirs_finds_each_package_bin_folder(tmp_path):
+    nvidia = tmp_path / "site-packages" / "nvidia"
+    (nvidia / "cublas" / "bin").mkdir(parents=True)
+    (nvidia / "cudnn" / "bin").mkdir(parents=True)
+    (nvidia / "cuda_runtime" / "include").mkdir(parents=True)   # no bin folder: skipped
+    (nvidia / "stray.txt").write_text("x")
+    found = transcribe_mod._nvidia_bin_dirs([nvidia, tmp_path / "missing"])
+    assert found == [nvidia / "cublas" / "bin", nvidia / "cudnn" / "bin"]
+
+
+def test_cuda12_blas_looks_in_the_wheel_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(transcribe_mod.os, "name", "nt")
+    monkeypatch.setattr(transcribe_mod.os, "add_dll_directory", lambda p: None, raising=False)
+    monkeypatch.setenv("PATH", "")
+    bin_dir = tmp_path / "nvidia" / "cublas" / "bin"
+    bin_dir.mkdir(parents=True)
+    for name in transcribe_mod._CUBLAS12:
+        (bin_dir / name).write_bytes(b"")
+    monkeypatch.setattr(transcribe_mod, "_nvidia_bin_dirs", lambda roots=None: [bin_dir])
+    loaded = []
+    assert transcribe_mod._cuda12_blas(load=loaded.append) == bin_dir
+    assert [Path(p).name for p in loaded] == list(transcribe_mod._CUBLAS12)
+    assert transcribe_mod._cuda12_blas(dirs=[tmp_path], load=loaded.append) is None
+
+
+def test_add_nvidia_dll_dirs_puts_folders_on_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(transcribe_mod.os, "name", "nt")
+    added = []
+    monkeypatch.setattr(transcribe_mod.os, "add_dll_directory", added.append, raising=False)
+    monkeypatch.setenv("PATH", "C:\base")
+    cudnn = tmp_path / "nvidia" / "cudnn" / "bin"
+    cudnn.mkdir(parents=True)
+    assert transcribe_mod._add_nvidia_dll_dirs([cudnn]) == [cudnn]
+    assert transcribe_mod.os.environ["PATH"].startswith(str(cudnn))
+    assert added == [str(cudnn)]
+    transcribe_mod._add_nvidia_dll_dirs([cudnn])   # twice does not duplicate the PATH entry
+    assert transcribe_mod.os.environ["PATH"].count(str(cudnn)) == 1

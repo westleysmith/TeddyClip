@@ -38,98 +38,92 @@ def all_words(segments: list[Segment]) -> list[Word]:
 
 # GPU detection
 
-def _parse_arch(arch: str) -> tuple[int, int] | None:
-    """"sm_86" -> (8, 6). The last digit is the minor version and everything
-    before it is the major, which reads both sm_86 (8.6) and sm_120 (12.0)
-    correctly."""
-    if not arch.startswith("sm_"):
-        return None  # ignore "compute_*" PTX entries
-    digits = arch[3:]
-    if not digits.isdigit() or len(digits) < 2:
-        return None
-    return int(digits[:-1]), int(digits[-1])
-
-
-def _runs_on(arch: tuple[int, int], device: tuple[int, int]) -> bool:
-    """Whether code compiled for `arch` runs on a device of capability
-    `device`: same major version, at or below the device's minor. CUDA is
-    forward compatible within a major version but not across one."""
-    return arch[0] == device[0] and arch[1] <= device[1]
-
-
 def cuda_usable() -> tuple[bool, str]:
-    """(usable, reason): whether CUDA work will actually run here.
+    """(usable, reason): whether faster-whisper can use an NVIDIA GPU here.
 
-    torch.cuda.is_available() only says a driver and a device exist. A GPU
-    outside the installed build's architecture list passes it and then dies at
-    the first inference with "no kernel image is available". The reason string
-    is always worth showing: "no GPU" and "GPU newer than this build" both mean
-    CPU, but have different fixes."""
+    The question is asked of CTranslate2, faster-whisper's own engine, not of
+    PyTorch: the documented install uses the CPU build of PyTorch (all PANNs
+    needs), which would always answer no. The reason string is always worth
+    showing, since it explains why the CPU is being used."""
     try:
-        import torch
+        import ctranslate2
     except Exception as e:
-        return False, f"PyTorch did not load ({type(e).__name__})"
-
+        return False, f"CTranslate2 did not load ({type(e).__name__})"
     try:
-        if not torch.cuda.is_available():
-            return False, "no CUDA GPU detected"
-
-        name = torch.cuda.get_device_name(0)
-        device = torch.cuda.get_device_capability(0)
-        archs = [a for a in (_parse_arch(a) for a in torch.cuda.get_arch_list()) if a]
-
-        # No architectures at all means a CPU-only build, which is what a plain
-        # `pip install torch` gives on Windows.
-        if not archs:
-            return False, f"{name} found, but this is a CPU-only PyTorch build"
-
-        if any(_runs_on(a, device) for a in archs):
-            return True, name
-
-        # Which side the card falls on decides the advice, so say it.
-        here = f"sm_{device[0]}{device[1]}"
-        if device < min(archs):
-            oldest = min(archs)
-            return False, (
-                f"{name} is compute capability {here}, which is older than the "
-                f"oldest this PyTorch build supports (sm_{oldest[0]}{oldest[1]})"
-            )
-        newest = max(archs)
-        return False, (
-            f"{name} is compute capability {here}, and this "
-            f"PyTorch build only goes up to sm_{newest[0]}{newest[1]}"
-        )
+        count = ctranslate2.get_cuda_device_count()
     except Exception as e:
         # A diagnostic must never take the caller down.
         return False, f"could not check the GPU ({type(e).__name__})"
+    if count <= 0:
+        return False, "no NVIDIA GPU with a working driver was found"
+    return True, "NVIDIA GPU found" if count == 1 else f"{count} NVIDIA GPUs found"
 
 
 # faster-whisper's engine, CTranslate2, is built against CUDA 12 and loads
-# cuBLAS 12 by name the first time it runs on the GPU, not when the model
-# loads. PyTorch ships CUDA 13 libraries, so cublas64_12.dll comes from
-# NVIDIA's nvidia-cublas-cu12 wheel or a CUDA 12 toolkit.
+# cuBLAS 12 and cuDNN 9 by name the first time it runs on the GPU, not when the
+# model loads. They come from NVIDIA's nvidia-cublas-cu12 and nvidia-cudnn-cu12
+# wheels (the "gpu" extra: pip install -e .[gpu]) or a CUDA 12 toolkit.
 _CUBLAS12 = ("cublasLt64_12.dll", "cublas64_12.dll")   # the first is the second's dependency
 _GPU_LIBRARY_ERROR = re.compile(r"cublas|cudnn|cuda", re.IGNORECASE)
 
 
-def _cublas12_dirs() -> list[Path]:
-    """Where cuBLAS 12 may be, the pip wheel's copy first."""
-    dirs: list[Path] = []
-    try:
-        import nvidia.cublas
+def _nvidia_bin_dirs(roots: list[Path] | None = None) -> list[Path]:
+    """The bin folder of every NVIDIA pip package (site-packages/nvidia/*/bin)
+    that exists: cuBLAS from nvidia-cublas-cu12, cuDNN from nvidia-cudnn-cu12.
+    `roots` are the "nvidia" folders to look in; by default those of the
+    installed packages."""
+    if roots is None:
+        roots = []
+        try:
+            import nvidia
 
-        dirs += [Path(p) / "bin" for p in nvidia.cublas.__path__]
-    except Exception:
-        pass  # no cuBLAS wheel installed: the other places are still looked at
+            roots += [Path(p) for p in nvidia.__path__]
+        except Exception:
+            pass  # no NVIDIA wheels installed: nothing to add
+        try:
+            import site
+
+            for base in [*site.getsitepackages(), site.getusersitepackages()]:
+                roots.append(Path(base) / "nvidia")
+        except Exception:
+            pass  # a stripped-down Python without site: the import above had to do
+    found: list[Path] = []
+    for root in roots:
+        try:
+            candidates = sorted(root.glob("*/bin"))
+        except OSError:
+            continue
+        for folder in candidates:
+            if folder.is_dir() and folder not in found:
+                found.append(folder)
+    return found
+
+
+def _add_nvidia_dll_dirs(dirs: list[Path] | None = None) -> list[Path]:
+    """Make the NVIDIA pip packages' DLLs findable before a CUDA model loads:
+    each folder goes on PATH (CTranslate2 loads cuDNN by name, which
+    os.add_dll_directory alone does not reach) and is added as a DLL directory.
+    Returns the folders. Only Windows needs this."""
+    if os.name != "nt":
+        return []
+    folders = _nvidia_bin_dirs() if dirs is None else dirs
+    on_path = os.environ.get("PATH", "").split(os.pathsep)
+    for folder in folders:
+        if str(folder) not in on_path:
+            os.environ["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
+        try:
+            os.add_dll_directory(str(folder))
+        except (OSError, AttributeError):
+            pass  # on PATH already
+    return folders
+
+
+def _cublas12_dirs() -> list[Path]:
+    """Where cuBLAS 12 may be, the pip wheels' copy first."""
+    dirs: list[Path] = list(_nvidia_bin_dirs())
     if os.environ.get("CUDA_PATH"):
         dirs.append(Path(os.environ["CUDA_PATH"]) / "bin")
     dirs += [Path(p) for p in os.environ.get("PATH", "").split(os.pathsep) if p]
-    try:
-        import torch
-
-        dirs.append(Path(torch.__file__).parent / "lib")   # a CUDA 12 PyTorch had them
-    except Exception:
-        pass  # no PyTorch here: one place fewer to look
     return dirs
 
 
@@ -171,12 +165,16 @@ def _on_gpu(model) -> bool:
     return getattr(getattr(model, "model", None), "device", "cpu") == "cuda"
 
 
-def _gpu_ready() -> tuple[bool, str]:
+def gpu_ready() -> tuple[bool, str]:
     usable, reason = cuda_usable()
     if not usable:
         return False, reason
+    _add_nvidia_dll_dirs()
     if _cuda12_blas() is None:
-        return False, "NVIDIA cuBLAS 12 (cublas64_12.dll) was not found"
+        return False, (
+            "NVIDIA cuBLAS 12 (cublas64_12.dll) was not found; "
+            "run 'pip install -e .[gpu]' to add the GPU libraries"
+        )
     return True, reason
 
 
@@ -189,7 +187,7 @@ def _load_model(model_size: str, device: str = "auto"):
     from faster_whisper import WhisperModel
 
     if device in ("auto", "cuda"):
-        ready, reason = _gpu_ready()
+        ready, reason = gpu_ready()
         if not ready:
             if device == "cuda":
                 raise RuntimeError(f"GPU transcription is not possible: {reason}")

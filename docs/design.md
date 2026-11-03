@@ -244,8 +244,9 @@ The model name above is a placeholder until tested.
 2. `winget install Gyan.FFmpeg`.
 3. Ollama from ollama.com, then `ollama pull qwen3:4b` (the configured default, a starting point to be tested).
 4. Download TeddyClip (git clone or ZIP). In its folder: `py -3.12 -m venv .venv`, `.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu`, then `.venv\Scripts\pip install -e .`.
-5. `.venv\Scripts\teddyclip check`, then use `TeddyClip.bat`. The first run downloads the whisper model and the PANNs weights. GPU transcription needs an up-to-date NVIDIA driver; without CUDA it still works on the CPU, slower.
-6. OBS setup page (`docs/obs-setup.md`): Hybrid MP4 output, optional chapter marker hotkey, optional separate mic track, recording path pointed at `1 Inbox`.
+5. On an NVIDIA PC, `.venv\Scripts\pip install -e .[gpu]` adds the CUDA 12 libraries faster-whisper needs (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`). GPU transcription needs these plus an up-to-date NVIDIA driver; without them everything still works on the CPU, slower. `cuda_usable()` asks CTranslate2 (not PyTorch, which is the CPU build) whether a GPU exists, and the DLL folders of those packages are added before a CUDA model loads. This path has not yet been tested on a real GPU.
+6. `.venv\Scripts\teddyclip check`, then use `TeddyClip.bat`. The first run downloads the whisper model and the PANNs weights.
+7. OBS setup page (`docs/obs-setup.md`): Hybrid MP4 output, optional chapter marker hotkey, optional separate mic track, recording path pointed at `1 Inbox`.
 
 ## 12. Open items to confirm on real footage
 

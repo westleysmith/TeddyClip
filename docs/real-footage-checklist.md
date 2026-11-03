@@ -5,7 +5,7 @@ TeddyClip was built and tested on made-up test videos. This checklist is for the
 ## 1. Check the setup
 
 - [ ] Run `.venv\Scripts\teddyclip check` and read every line.
-- [ ] **GPU transcription:** the CUDA line says `[ok]`. If it says whisper will use the CPU, update the NVIDIA driver and run the check again. It still works on the CPU, just slower.
+- [ ] **GPU transcription:** the CUDA line says `[ok]`. For an NVIDIA card this needs the GPU libraries (`.venv\Scripts\pip install -e .[gpu]`) and an up-to-date NVIDIA driver. If the line says whisper will use the CPU, read the reason on it, fix that, and run the check again. Without the GPU libraries everything still works on the CPU, just slower. Note that the GPU setup has not yet been tested on a real GPU, so write down exactly what the line says.
 - [ ] **NVENC:** the line says clips are encoded on the NVIDIA GPU. If it says CPU, clips still work but cutting is slower.
 - [ ] **Ollama:** the line says it is running and has your model.
 - [ ] **Folders:** the line shows the TeddyClip folder you expect.
@@ -14,7 +14,8 @@ TeddyClip was built and tested on made-up test videos. This checklist is for the
 
 Use a real recording of a few hours, ideally one where you remember saying "clip that".
 
-- [ ] Put it in `1 Inbox\<Game>` and double-click `TeddyClip.bat`.
+- [ ] **Before the first run, copy the original recording somewhere outside the inbox** (for example `C:\TeddyClip-test`). TeddyClip moves the original into `Done` and adds chapters to it, and a later run on that file would mistake the chapters for OBS markers. The copy is your clean original for re-runs and for step 7.
+- [ ] Put the recording in `1 Inbox\<Game>` and double-click `TeddyClip.bat`.
 - [ ] Write down the recording length and how long the run took. Compare the speed of the transcribing step with what you expect from the GPU (a GPU should be many times faster than real time; the CPU is much slower).
 - [ ] While it runs, watch Task Manager > Performance > GPU. Confirm the GPU is busy during transcribing and while clips are cut (the "Video Encode" graph moves when NVENC is used).
 - [ ] **VRAM:** whisper and Ollama run one after the other. Confirm dedicated GPU memory is not full at the hand-over, and that nothing fails with an out-of-memory message. Then try a batch of two or three recordings in the inbox and confirm the later ones finish as well as the first. If memory runs out, note which model and which card (6 GB or 12 GB) and set `whisper_model` to something smaller in `config.yaml`.
@@ -48,14 +49,15 @@ This matters most.
 - [ ] In DaVinci Resolve, put the original recording from `Done` on a timeline that starts at 01:00:00:00.
 - [ ] In the Media Pool, right-click the timeline and choose Timelines > Import > Timeline Markers from EDL, and pick `Resolve markers.edl` from the clip folder.
 - [ ] Confirm the markers land on the right moments (compare two or three against their clips), have the right colors, and show the clip titles.
-- [ ] If markers are all off by a fixed amount, your timeline probably does not start at 01:00:00:00. Set `resolve: timeline_start` to match and process again.
+- [ ] If markers are all off by a fixed amount, your timeline probably does not start at 01:00:00:00. Set `resolve: timeline_start` to match, then make the markers again by running `.venv\Scripts\teddyclip process "<path to the copy>"` on your copy of the original (see step 7).
 - [ ] Note your Resolve version.
 
 ## 7. Try two AI models
 
-- [ ] Process the same session with `qwen3:4b` (the default) and keep its clip folder.
-- [ ] Run `ollama pull gemma3:4b`, set `llm: model: gemma3:4b` in `config.yaml`, move the recording back into the inbox from `Done`, and run again.
-- [ ] Compare the titles and scores of the top clips in both `moments.csv` files. Record which one titled better and which found more quiet jokes, and keep that model in `config.yaml`.
+- [ ] Use the copy of the original recording you made before the first run (step 2). Do not reuse the file in `Done`: it has chapters, which would be read as OBS markers and force extra clips, spoiling the comparison.
+- [ ] For the first model, make sure `config.yaml` says `qwen3:4b` (the default) and run `.venv\Scripts\teddyclip process "<path to the copy>"`. Files outside the inbox are left in place, so the copy stays untouched. Note the name of the clip folder it makes.
+- [ ] Run `ollama pull gemma3:4b`, set `llm: model: gemma3:4b` in `config.yaml`, and run the same `teddyclip process "<path to the copy>"` command again. The second clip folder gets a ` (2)` on its name.
+- [ ] Compare the titles and scores of the top clips in the two `moments.csv` files. Record which one titled better and which found more quiet jokes, and keep that model in `config.yaml`.
 - [ ] Note the speed difference and any errors from either model.
 
 ## What to write down at the end
