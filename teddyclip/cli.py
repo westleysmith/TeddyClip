@@ -132,6 +132,41 @@ def _highest(*signals: np.ndarray) -> np.ndarray:
     return out
 
 
+ARCHIVE_ROOM = 1.01  # the copy in Done is about as big as the original; a little to spare
+
+
+def _check_room_for_original(src: Path, done: Path) -> None:
+    """Raise a plain error when the Done drive cannot hold a copy of `src`."""
+    need = Path(src).stat().st_size * ARCHIVE_ROOM
+    free = shutil.disk_usage(done).free
+    if free < need:
+        drive = Path(done).drive or Path(done).anchor or str(done)
+        raise RuntimeError(
+            f"Not enough free space on {drive} to file the original in Done: "
+            f"need about {max(need / 1e9, 0.1):.1f} GB, {free / 1e9:.1f} GB is free. "
+            "Free up some space and run TeddyClip again."
+        )
+
+
+def _mark_incomplete(out_dir: Path) -> Path | None:
+    """Rename the clip folder of a failed run to "<name> (incomplete)", or
+    "(incomplete 2)" and so on when that is taken, so the next run gets the
+    clean name. Returns the new folder, or None when there was nothing to
+    rename or the rename itself failed."""
+    if not out_dir.is_dir():
+        return None
+    target, n = out_dir.with_name(f"{out_dir.name} (incomplete)"), 1
+    while target.exists():
+        n += 1
+        target = out_dir.with_name(f"{out_dir.name} (incomplete {n})")
+    try:
+        out_dir.rename(target)
+    except OSError:
+        return None
+    print(f"The clips made so far are in \"{target.name}\".")
+    return target
+
+
 def process_recording(path: Path, cfg: Config) -> Path:
     """Find the moments in one recording, cut them into a clip folder with
     moments.csv and Resolve markers, and move the original into Done with
@@ -211,18 +246,24 @@ def process_recording(path: Path, cfg: Config) -> Path:
     moments = select(moments, info.duration, cfg.max_clips)
 
     kept = sum(m.keep for m in moments)
+    # Checked before anything is cut, so a full disk fails early and cleanly.
+    _check_room_for_original(path, paths.done)
     print(f"Found {_count(len(moments), 'moment')}, cutting {_count(kept, 'clip')}")
     out_dir.mkdir(parents=True, exist_ok=True)
-    write_clips(path, moments, out_dir)
-    write_moments_csv(moments, out_dir / "moments.csv")
-    write_resolve_edl(moments, out_dir / "Resolve markers.edl", info.fps, cfg.resolve_timeline_start, name)
+    try:
+        write_clips(path, moments, out_dir)
+        write_moments_csv(moments, out_dir / "moments.csv")
+        write_resolve_edl(moments, out_dir / "Resolve markers.edl", info.fps, cfg.resolve_timeline_start, name)
 
-    if _in_inbox(path, cfg):
-        print("Moving the original to Done...")
-        archive_original(path, paths.done, moments, name)
-    else:
-        print("Copying the original into Done (it is outside the inbox, so it stays where it is)...")
-        archive_original(path, paths.done, moments, name, keep_source=True)
+        if _in_inbox(path, cfg):
+            print("Moving the original to Done...")
+            archive_original(path, paths.done, moments, name)
+        else:
+            print("Copying the original into Done (it is outside the inbox, so it stays where it is)...")
+            archive_original(path, paths.done, moments, name, keep_source=True)
+    except BaseException:
+        _mark_incomplete(out_dir)
+        raise
     # The transcript and AI answers stay cached; the audio is only needed again
     # if the recording is processed again, and costs over 1 GB per 4 hours.
     for wav in (wav16, wav32):
@@ -238,6 +279,20 @@ def _describe(error: Exception) -> str:
     return str(error).strip() or type(error).__name__
 
 
+_GENERIC_LINES = {"conversion failed!", "exiting normally, received signal 2."}
+
+
+def _summary(why: str) -> str:
+    """One line for the summary: the last line that says something. ffmpeg
+    errors start with "ffmpeg could not ... (exit code N):" and end with
+    "Conversion failed!"; the reason is in between."""
+    lines = [line.strip() for line in why.splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.lower() not in _GENERIC_LINES and not line.endswith(":"):
+            return line
+    return lines[0] if lines else why
+
+
 def process_inbox(cfg: Config) -> int:
     """Process every finished .mp4 and .mkv under the inbox, one at a time. A
     recording that fails stays in the inbox and the rest carry on. Returns the
@@ -248,6 +303,12 @@ def process_inbox(cfg: Config) -> int:
     if not files:
         print(f"Nothing to do: there are no recordings in {inbox}")
         return 0
+    # OBS's "Automatically remux to mp4" leaves the .mkv next to the .mp4 it made.
+    remuxed = {(p.parent, p.stem.lower()) for p in files if p.suffix.lower() == ".mp4"}
+    for path in [p for p in files if p.suffix.lower() == ".mkv" and (p.parent, p.stem.lower()) in remuxed]:
+        print(f"Skipping {path.name}: it is a duplicate of {path.stem}.mp4 next to it (OBS remuxed it). "
+              "Delete the .mkv once you no longer need it.")
+        files.remove(path)
 
     processed: list[Path] = []
     failed: list[tuple[Path, str]] = []
@@ -268,7 +329,7 @@ def process_inbox(cfg: Config) -> int:
     for folder in processed:
         print(f"  Clips in {folder}")
     for path, why in failed:
-        print(f"  Failed: {path.name} ({why.splitlines()[0]})")
+        print(f"  Failed: {path.name} ({_summary(why)})")
     if waiting:
         print(f"  {len(waiting)} recording(s) still being written; run again once they are finished.")
     return len(failed)

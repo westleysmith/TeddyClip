@@ -175,3 +175,83 @@ def test_bad_whisper_device_is_a_config_error(tmp_path, capsys):
     bad.write_text("whisper_device: gpu\n", encoding="utf-8")
     assert main(["--config", str(bad), "check"]) == 2
     assert "whisper_device" in capsys.readouterr().out
+
+
+# late failures
+
+FFMPEG_ERROR = (
+    "ffmpeg could not cut a clip (exit code 1):\n"
+    "[out#0/mp4 @ 000001] Error writing trailer: No space left on device\n"
+    "Conversion failed!"
+)
+
+
+def test_summary_line_is_the_last_meaningful_line_of_the_error():
+    assert cli._summary(FFMPEG_ERROR) == "[out#0/mp4 @ 000001] Error writing trailer: No space left on device"
+    assert cli._summary("plain message") == "plain message"
+    assert cli._summary("header only:\n\n") == "header only:"
+
+
+def test_inbox_summary_shows_the_meaningful_line(cfg, monkeypatch, capsys):
+    cfg.paths.ensure()
+    (cfg.paths.inbox / "a.mp4").write_bytes(b"x")
+    monkeypatch.setattr(cli, "is_finished", lambda p, **k: True)
+    monkeypatch.setattr(cli, "process_recording", lambda p, c: (_ for _ in ()).throw(RuntimeError(FFMPEG_ERROR)))
+    assert process_inbox(cfg) == 1
+    summary = capsys.readouterr().out.split("\nDone:")[1]
+    assert "Failed: a.mp4 ([out#0/mp4 @ 000001] Error writing trailer: No space left on device)" in summary
+    assert "exit code" not in summary
+
+
+def test_a_full_done_drive_stops_before_any_clip_is_cut(fake_pipeline, tiny_video, cfg, monkeypatch):
+    fake_pipeline(trigger_at=8.0)
+    src = stage_in_inbox(tiny_video, cfg)
+    monkeypatch.setattr(cli.shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(100, 99, 1))
+    monkeypatch.setattr(cli, "write_clips", lambda *a, **k: (_ for _ in ()).throw(AssertionError("clips cut")))
+    try:
+        process_recording(src, cfg)
+    except RuntimeError as e:
+        message = str(e)
+    else:
+        raise AssertionError("no error")
+    assert message.startswith("Not enough free space on ") and "to file the original in Done: need about" in message
+    assert src.exists()
+    assert not [p for p in cfg.paths.clips.iterdir()]
+
+
+def test_a_failed_run_leaves_its_clip_folder_marked_incomplete(fake_pipeline, tiny_video, cfg, monkeypatch):
+    fake_pipeline(trigger_at=8.0)
+    src = stage_in_inbox(tiny_video, cfg)
+    date = time.strftime("%Y-%m-%d", time.localtime(src.stat().st_mtime))
+    real_archive = cli.archive_original
+    monkeypatch.setattr(cli, "archive_original", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk gone")))
+    for _ in range(2):
+        try:
+            process_recording(src, cfg)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("no error")
+    names = sorted(p.name for p in cfg.paths.clips.iterdir())
+    assert names == [f"{date} tiny (incomplete 2)", f"{date} tiny (incomplete)"]
+    assert any((cfg.paths.clips / f"{date} tiny (incomplete)").glob("*.mp4"))
+    assert src.exists()
+    monkeypatch.setattr(cli, "archive_original", real_archive)
+    assert process_recording(src, cfg).name == f"{date} tiny"
+
+
+def test_inbox_skips_an_mkv_that_obs_already_remuxed_to_mp4(cfg, monkeypatch, capsys):
+    cfg.paths.ensure()
+    game = cfg.paths.inbox / "Game"
+    game.mkdir()
+    for name in ("session.mkv", "session.mp4", "other.mkv"):
+        (game / name).write_bytes(b"x")
+    (cfg.paths.inbox / "session.mkv").write_bytes(b"x")   # no .mp4 next to this one
+    seen = []
+    monkeypatch.setattr(cli, "is_finished", lambda p, **k: True)
+    monkeypatch.setattr(cli, "process_recording", lambda p, c: seen.append(p) or cfg.paths.clips)
+    assert process_inbox(cfg) == 0
+    assert sorted(seen) == sorted([game / "session.mp4", game / "other.mkv", cfg.paths.inbox / "session.mkv"])
+    out = capsys.readouterr().out
+    assert out.count("session.mkv") == 1 and "duplicate" in out
+    assert (game / "session.mkv").exists()

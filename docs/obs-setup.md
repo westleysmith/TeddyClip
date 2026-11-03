@@ -22,6 +22,8 @@ TeddyClip only picks up `.mp4` and `.mkv` files, and it waits until OBS has stop
 
 Hybrid MP4 does not lose the whole recording if OBS or the PC crashes, and it is the format that supports chapter markers (next step). If you would rather not use it, plain MP4 or MKV also work; you just will not have the marker hotkey.
 
+If you record MKV, turn off Settings > Advanced > Recording > **Automatically remux to mp4**. Otherwise OBS leaves two copies of every recording in the inbox; TeddyClip processes the .mp4 and skips the .mkv, which then just takes up space.
+
 ## 3. A clip button: Add Chapter Marker (optional)
 
 Saying "clip that" out loud already guarantees a clip. A hotkey is a quiet alternative for moments when you do not want to talk, and it works even if the words are misheard.
