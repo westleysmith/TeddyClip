@@ -1,6 +1,6 @@
 # TeddyClip design (v1 MVP)
 
-Date: 2026-11-03. Status: draft for review.
+Date: 2026-11-03. Status: v1 built and tested on synthetic media; tuning on real footage. Sections 3, 4.2, 5, 9, 11 and 12 were updated after the build to match the decisions made along the way.
 
 ## 1. Purpose
 
@@ -57,7 +57,7 @@ TeddyClip\
      2026-11-01 Elden Ring.mp4
      2026-11-01 Elden Ring - chapters.txt
   Done\
-     2026-11-01 Elden Ring.mp4        original, with chapters embedded
+     2026-11-01 Elden Ring.mp4        original, with chapters embedded (keeps its extension: .mkv stays .mkv)
   .cache\                             transcripts, signals, LLM answers, model weights
 ```
 
@@ -65,13 +65,15 @@ TeddyClip\
 1. They drop recordings into `1 Inbox`, optionally inside a folder named after the game, or point OBS's recording path there.
 2. They double-click `TeddyClip.bat` (runs `teddyclip`). Each finished recording in the inbox is processed: moments found, clips cut, CSV and markers written, original moved to `Done` with chapters embedded.
 3. They watch the clips and delete the ones they do not want.
-4. They run `teddyclip highlight "2 Clips\2026-11-01 Elden Ring"` (or a second bat file). The remaining clips are joined in order into a highlight video with chapters.
+4. They drag the clip folder onto `Highlight.bat` (which runs `teddyclip highlight "2 Clips\2026-11-01 Elden Ring"`). The remaining clips are joined in order into a highlight video with chapters.
 
 **Rules:**
 - A file is only processed once it has stopped growing for 60 seconds and can be opened exclusively, so a recording in progress is never touched.
 - The game comes from the inbox subfolder name, then from a keyword in the filename, then falls back to `generic`.
-- Recordings are never deleted. Moving to `Done` with chapters is a remux into `Done`; the inbox copy is removed only after the new file's duration matches. On any failure the original stays in the inbox and an error is printed.
-- Re-processing the same file reuses everything in `.cache` keyed by file size, modified time and settings.
+- Recordings are never deleted. Moving to `Done` with chapters is a remux into `Done` that keeps the original's container extension (an `.mkv` stays `.mkv`); the inbox copy is removed only after the new file's duration matches. On any failure the original stays in the inbox and an error is printed.
+- `teddyclip process <file>` on a file outside the inbox still writes the clips and a copy into `Done`, but leaves the original where it is.
+- A recording with no audio track is refused with a plain message pointing at OBS's audio track setting; it stays in the inbox.
+- Re-processing the same file reuses the transcript and AI answers in `.cache`, keyed by file name, size and modified time. The extracted WAV files are deleted after a successful run, because they run over 1 GB per 4 hours; they are rebuilt if the recording is processed again.
 
 ## 4. Pipeline
 
@@ -110,7 +112,7 @@ recording
 - **Trigger or OBS marker:** window = [t - 45 s, t - 0.3 s], ending just before the phrase so "clip that" is not in the clip. Always kept, never dropped by scoring or caps.
 - **Signal peak:** window from 20 s before to 15 s after the peak, expanded to sentence boundaries from the transcript.
 - **Screen events:** OCR runs only inside candidate windows, sampling a frame every 2 s, because scanning a whole 4 hour video on CPU is too slow. A hit (e.g. YOU DIED) is attached to the window and raises its score by the `screen_text` weight.
-- Overlapping windows merge. Duplicates are removed with Clips Kitty's three checks (time overlap over 40 percent, transcript text similarity over 70 percent, shared segments over 40 percent).
+- Overlapping windows merge. When a "clip that" window merges with a nearby signal moment, the merged clip still ends before the phrase (at the latest forced end), so the trigger words are never in the clip. Forced windows are also never dropped or lengthened for being shorter than the minimum length. Duplicates are removed with Clips Kitty's three checks (time overlap over 40 percent, transcript text similarity over 70 percent, shared segments over 40 percent).
 - Lengths are clamped to 20 s to 120 s (configurable).
 
 ### 4.3 Local model
@@ -132,11 +134,11 @@ recording
 
 | Output | Details |
 |---|---|
-| Clips | `<h>h<mm>m<ss>s - <title>.mp4`; triggered ones get `Clip that - ` before the title. Frame-accurate re-encode, NVENC with CPU retry, audio loudness-normalized to -14 LUFS, short audio fades. Clips Kitty `cutter.py`, `encoding.py`. |
+| Clips | `<h>h<mm>m<ss>s - <title>.mp4` at the recording's own resolution; triggered ones get `Clip that - ` before the title. Frame-accurate re-encode, NVENC with CPU retry, audio loudness-normalized to -14 LUFS, short audio fades. Clips Kitty `cutter.py`, `encoding.py`. |
 | `moments.csv` | Every candidate, kept or not: start, end, score, title, why, signals, file name. Opens in Excel. |
-| `Resolve markers.edl` | Timeline markers as CMX 3600 EDL with Resolve marker comments: duration = moment length, name = title, note = why, color by type (red trigger, yellow laughter, blue joke sweep, purple game event). Timeline start (default 01:00:00:00) and frame rate in config. Ours. Must be verified by importing in their Resolve version. |
-| Chapters in original | ffmetadata chapters written during the remux into `Done`. Ours. |
-| Highlight video | Remaining clips in `2 Clips\<recording>` joined in time order, scaled to 1920x1080, lossless concat (Clips Kitty `assemble.py`, trimmed). |
+| `Resolve markers.edl` | Timeline markers as CMX 3600 EDL with Resolve marker comments: duration = moment length, name = title, color by type (red trigger and OBS marker, yellow laughter, blue joke sweep, purple game event, green loud). The marker EDL format has no note field, so the "why" lives only in `moments.csv`. Timeline start (default 01:00:00:00) is in config; the frame rate is read from the recording. Positions use real frame indices, so 59.94 fps footage does not drift. Ours. Must be verified by importing in their Resolve version. |
+| Chapters in original | ffmetadata chapters written during a no-re-encode remux into `Done`, one per kept moment. The file keeps its container extension (`.mkv` stays `.mkv`). Because the container makes chapters gapless, a leading "Start" chapter is added when the first moment starts later than the beginning. Ours. |
+| Highlight video | Remaining clips in `2 Clips\<recording>` joined in time order with a lossless concat at source resolution. It is not scaled to 1920x1080: the clips are all cut from the same recording, so they already match each other (Clips Kitty `assemble.py`, trimmed). |
 | `chapters.txt` | YouTube chapter list obeying YouTube's rules (starts at 0:00, at least 3 chapters, each at least 10 s), or nothing if they cannot be met. Clips Kitty `chapters.py`. |
 
 ## 6. Code layout
@@ -145,6 +147,7 @@ recording
 TeddyClip/
   teddyclip/
     cli.py          entry point: (no args) process inbox | process <file> | highlight <folder> | check
+                    (process <file> outside the inbox leaves the original in place)
     config.py       loads config.yaml over built-in defaults; paths
     media.py        ffprobe/ffmpeg: probe, audio extract, frames, chapters read/write, cut, concat, encoder pick
     transcribe.py   faster-whisper with cache and GPU/CPU fallback
@@ -225,6 +228,7 @@ The model name above is a placeholder until tested.
 
 - Every external failure is reported in plain words with the fix, e.g. "ffmpeg not found: see README step 2" or "Ollama is not running: continuing without AI titles".
 - One bad recording never stops the batch; it stays in the inbox and the error is listed at the end.
+- A recording with no audio track is refused up front with a plain message ("has no sound track", with where to look in OBS) rather than producing empty results.
 - NVENC failure on a clip retries on CPU. CUDA failure in whisper falls back to CPU.
 - `teddyclip check` verifies ffmpeg, NVENC, CUDA for whisper, Ollama and the configured model, PANNs weights, OCR, and that the folders exist, printing a pass or fail list.
 
@@ -232,16 +236,16 @@ The model name above is a placeholder until tested.
 
 - **Unit tests (no media):** trigger fuzzy matching against misheard variants, percentile normalization and soft OR, peak windows and merging, dedupe, section-capped selection, time formatting, YouTube chapter rules, EDL formatting, LLM JSON parsing on messy replies, growing-file check.
 - **End-to-end test:** builds a tiny video on the fly with ffmpeg (test pattern plus tones and silence), runs cut, concat, chapter embed and EDL writing, and checks durations and metadata. No media is committed.
-- **Real-footage check (manual):** one real session; confirm every "clip that" came out, the top 10 clips are good, YOU DIED events are found in a Souls session, and the EDL imports into Resolve. Tune weights from there.
+- **Real-footage check (manual):** one real session; confirm every "clip that" came out, the top 10 clips are good, YOU DIED events are found in a Souls session, and the EDL imports into Resolve. Also confirm `think: false` causes no Ollama errors with the chosen model, that GPU transcription and NVENC are really used, that VRAM holds when whisper and Ollama run back to back in a batch, and whether "clip" said in other contexts causes false triggers. Tune weights from there. The step-by-step list is `docs/real-footage-checklist.md`.
 
 ## 11. Install (for the README)
 
 1. Python 3.11+ from python.org.
 2. `winget install Gyan.FFmpeg`.
-3. Ollama from ollama.com, then `ollama pull <model>`.
-4. Download TeddyClip, run `pip install .` (CUDA libraries for whisper come as pip packages).
-5. `teddyclip check`, then use `TeddyClip.bat`.
-6. OBS setup page: Hybrid MP4 output, optional chapter marker hotkey, optional separate mic track, recording path pointed at `1 Inbox`.
+3. Ollama from ollama.com, then `ollama pull qwen3:4b` (the configured default, a starting point to be tested).
+4. Download TeddyClip (git clone or ZIP). In its folder: `py -3.12 -m venv .venv`, `.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu`, then `.venv\Scripts\pip install -e .`.
+5. `.venv\Scripts\teddyclip check`, then use `TeddyClip.bat`. The first run downloads the whisper model and the PANNs weights. GPU transcription needs an up-to-date NVIDIA driver; without CUDA it still works on the CPU, slower.
+6. OBS setup page (`docs/obs-setup.md`): Hybrid MP4 output, optional chapter marker hotkey, optional separate mic track, recording path pointed at `1 Inbox`.
 
 ## 12. Open items to confirm on real footage
 
@@ -250,3 +254,6 @@ The model name above is a placeholder until tested.
 - Resolve EDL marker import on their Resolve version.
 - RTX 3060 VRAM (6 or 12 GB); the whisper model choice adapts automatically.
 - Whether their OBS records mics on a separate track.
+- Whether `think: false` in Ollama requests is accepted by the chosen model without errors.
+- Whether GPU transcription and NVENC are used in practice, and whether VRAM is enough when whisper and Ollama run back to back.
+- Whether "clip" said in other contexts (for example a Counter-Strike magazine) causes false triggers.
