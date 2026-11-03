@@ -112,7 +112,7 @@ def _lines(m: Moment, segments: list[Segment]) -> str:
     )
 
 
-# ---- candidates --------------------------------------------------------------
+# candidates
 
 
 def forced_windows(times: list[float], kind: str, pre: float = 45, gap: float = 0.3) -> list[Moment]:
@@ -182,7 +182,7 @@ def sweep(
     return out
 
 
-# ---- shaping -----------------------------------------------------------------
+# shaping
 
 
 def snap(m: Moment, segments: list[Segment], min_s: float, max_s: float) -> Moment:
@@ -262,7 +262,7 @@ def merge(moments: list[Moment], segments: list[Segment]) -> list[Moment]:
     return sorted(out, key=lambda m: m.start)
 
 
-# ---- local model -------------------------------------------------------------
+# local model
 
 
 def _snippet(text: str) -> str:
@@ -348,7 +348,7 @@ def rerank(moments: list[Moment], llm: LLM, prompt: str, top: int = 15) -> list[
     return out
 
 
-# ---- selection ---------------------------------------------------------------
+# selection
 
 
 def select(

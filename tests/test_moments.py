@@ -30,7 +30,7 @@ class FakeLLM:
         return self.answers.pop(0) if self.answers else None
 
 
-# ---- forced windows and merge ----------------------------------------------
+# forced windows and merge
 
 def test_trigger_near_start_clamps():
     m = forced_windows([20.0], "trigger")[0]
@@ -96,7 +96,7 @@ def test_merge_different_text_does_not_merge():
     assert len(merge([Moment(0, 30, 5, "loud"), Moment(100, 130, 5, "loud")], segs)) == 2
 
 
-# ---- signal windows --------------------------------------------------------
+# signal windows
 
 def test_signal_windows_kind_is_strongest_signal():
     n = 100
@@ -121,7 +121,7 @@ def test_signal_windows_tie_goes_to_priority_and_missing_signals_default_to_loud
     assert signal_windows([(30.0, 65.0, 0.5)], {})[0].kind == "loud"
 
 
-# ---- snap ------------------------------------------------------------------
+# snap
 
 SEGS = [Segment(0, 10, "a", []), Segment(10, 25, "b", []), Segment(25, 40, "c", []),
         Segment(40, 100, "d", [])]
@@ -155,7 +155,7 @@ def test_snap_does_not_mutate_input():
     assert (src.start, src.end) == (12, 38)
 
 
-# ---- sweep -----------------------------------------------------------------
+# sweep
 
 def test_sweep_disabled_is_zero():
     assert sweep([Segment(0, 300, "hi", [])], FakeLLM([], enabled=False), "{transcript}").max() == 0
@@ -186,7 +186,7 @@ def test_sweep_clamps_wild_scores():
     assert out.max() == pytest.approx(1.0)
 
 
-# ---- label -----------------------------------------------------------------
+# label
 
 def test_label_falls_back_when_llm_fails():
     segs = [Segment(0, 30, "no way he just walked off the cliff again buddy", [])]
@@ -232,7 +232,7 @@ def test_label_skips_model_when_disabled():
     assert llm.prompts == [] and out[0].title == "hi there"
 
 
-# ---- rerank ----------------------------------------------------------------
+# rerank
 
 def test_rerank_repairs_partial_order():
     ms = [Moment(i, i + 30, 5, "loud") for i in range(3)]
@@ -270,7 +270,7 @@ def test_rerank_single_moment_makes_no_call():
     assert llm.prompts == []
 
 
-# ---- select ----------------------------------------------------------------
+# select
 
 def test_select_keeps_all_triggers_and_caps_sections():
     ms = [Moment(t, t + 30, 9, "loud") for t in range(0, 600, 31)] + forced_windows([5000], "trigger")
@@ -307,7 +307,7 @@ def test_select_handles_empty_and_zero_duration():
     assert len(select([Moment(0, 30, 5, "loud")], 0, 10)) == 1
 
 
-# ---- prompts ---------------------------------------------------------------
+# prompts
 
 @pytest.mark.parametrize("name,fields", [
     ("sweep", {"transcript": "[0 - 5] hi"}),
@@ -319,7 +319,7 @@ def test_prompts_load_format_and_have_no_dashes(name, fields):
     filled = text.format(**fields)
     for value in fields.values():
         assert str(value) in filled
-    assert "—" not in text and "–" not in text and "--" not in text
+    assert not any(bad in text for bad in (chr(0x2014), chr(0x2013), "-" * 2))
 
 
 def test_kinds_order():
