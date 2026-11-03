@@ -423,3 +423,21 @@ def test_prompts_load_format_and_have_no_dashes(name, fields):
 def test_kinds_order():
     assert KINDS == ("trigger", "marker", "laughter", "joke", "loud", "game")
     assert math.isclose(Moment(1, 4, 0, "loud").duration, 3)
+
+
+# prompts: the model writes its reason before its score, and the example score is low
+
+def test_schemas_ask_for_the_reason_before_the_score():
+    from teddyclip.moments import LABEL_SCHEMA, SWEEP_SCHEMA
+
+    assert list(SWEEP_SCHEMA["properties"]) == ["quote", "score"]
+    assert list(LABEL_SCHEMA["properties"]) == ["title", "why", "score", "trim_start", "trim_end"]
+    assert SWEEP_SCHEMA["required"] == list(SWEEP_SCHEMA["properties"])
+    assert LABEL_SCHEMA["required"] == list(LABEL_SCHEMA["properties"])
+
+
+@pytest.mark.parametrize("name, first", [("sweep", '"quote"'), ("label", '"why"')])
+def test_prompt_examples_put_the_reason_first_with_a_low_score(name, first):
+    example = next(line for line in load_prompt(name).splitlines() if line.startswith("{{"))
+    assert '"score": 2' in example
+    assert example.index(first) < example.index('"score"')

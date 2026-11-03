@@ -34,7 +34,7 @@ An NVIDIA GPU makes it faster but is not required. Everything below is done once
    ```
    `qwen3:4b` is the default and a starting point: other small models may title your clips better, and the [real-footage checklist](docs/real-footage-checklist.md) walks through comparing them.
 4. **Get TeddyClip.** Either `git clone https://github.com/westleysmith/TeddyClip.git`, or use Code > Download ZIP on the GitHub page and unzip it. Put the folder somewhere ordinary, such as `C:\TeddyClip-app`, rather than in a cloud-synced folder like Google Drive or OneDrive.
-5. **Install it.** Open a Command Prompt or PowerShell window in the TeddyClip folder and run these three commands, one after the other:
+5. **Install it.** Open a command window in the TeddyClip folder: open the folder in File Explorer, click the address bar at the top, type `cmd` and press Enter. Then run these three commands in it, one after the other:
    ```
    py -3.12 -m venv .venv
    .venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -58,7 +58,7 @@ The first real run downloads the whisper speech model and the laughter and shout
 ## Daily use
 
 1. Record your session in OBS. Set it up once using the [OBS setup guide](docs/obs-setup.md). While you play, say **"clip that"** out loud whenever something is worth keeping. Every one of those moments is guaranteed a clip.
-2. Put the recordings in `1 Inbox`. You can drop them straight in, or inside a folder named after the game (for example `1 Inbox\Elden Ring`). The folder name is used in the clip folder name, and for some games it turns on screen-text detection such as YOU DIED.
+2. Put the recordings in `1 Inbox`. By default that is `C:\Users\<you>\TeddyClip\1 Inbox`; the folder is made by the first run or by `teddyclip check`, which also prints the TeddyClip folder it is in. You can drop them straight in, or inside a folder named after the game (for example `1 Inbox\Elden Ring`). The folder name is used in the clip folder name, and for some games it turns on screen-text detection such as YOU DIED.
 3. Double-click `TeddyClip.bat`. It processes every finished recording in the inbox, one at a time, and leaves a recording alone if OBS is still writing it. A 4 hour session takes a while, so leave it running.
 4. Open `2 Clips\<date> <game>` and watch the clips. **Delete the ones you don't want.**
 5. Drag that clip folder onto `Highlight.bat`. The clips left in the folder are joined in time order into `3 Highlights`, with a YouTube chapters file next to it.
@@ -92,7 +92,7 @@ TeddyClip\                            created on first run, default C:\Users\<yo
 
 ## Settings
 
-Everything works with no changes except the names. Open `config.yaml` in Notepad to change a setting. If you break it, delete the line you changed or the whole file to go back to the defaults.
+Everything works with no changes except the names. The settings are in `config.yaml` in the TeddyClip app folder, next to `TeddyClip.bat`. Open it in Notepad to change a setting. If you break it, delete the line you changed or the whole file to go back to the defaults.
 
 | Setting | What it does |
 |---|---|

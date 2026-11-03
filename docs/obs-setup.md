@@ -1,8 +1,8 @@
 # OBS setup for TeddyClip
 
-Four settings in OBS make TeddyClip work better. Only the last one (the recording path) is needed; the rest are optional but recommended. Menu names are from a recent OBS Studio (30.2 or newer) and may differ slightly in other versions.
+Four settings in OBS make TeddyClip work better. All of them are optional. The first one (the recording path) helps most, because recordings then land in the inbox on their own; without it you move them there yourself. Menu names are from a recent OBS Studio (30.2 or newer) and may differ slightly in other versions.
 
-## 1. Recording path (needed)
+## 1. Recording path (recommended)
 
 Point OBS at the TeddyClip inbox so recordings land there on their own.
 
@@ -43,7 +43,7 @@ By default TeddyClip listens to the whole recording, including the game sound. G
 3. In the main OBS window, in the Audio Mixer, click the three dots (or the gear) on each source and choose **Advanced Audio Properties**. In the **Tracks** columns:
    - Game or desktop audio: track **1** only.
    - Each microphone: tracks **1** and **2**.
-4. Open `config.yaml` in the TeddyClip folder and change the line to:
+4. Open `config.yaml` in the TeddyClip app folder (the one with `TeddyClip.bat` in it) and change the line to:
    ```
    audio_track: 2
    ```

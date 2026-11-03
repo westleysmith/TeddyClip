@@ -14,7 +14,7 @@ TeddyClip was built and tested on made-up test videos. This checklist is for the
 
 Use a real recording of a few hours, ideally one where you remember saying "clip that".
 
-- [ ] **Before the first run, copy the original recording somewhere outside the inbox** (for example `C:\TeddyClip-test`). TeddyClip moves the original into `Done` and adds chapters to it, and a later run on that file would mistake the chapters for OBS markers. The copy is your clean original for re-runs and for step 7.
+- [ ] **Before the first run, copy the original recording somewhere outside the inbox** (for example `C:\TeddyClip-test`). TeddyClip moves the original into `Done` and adds chapters to it, and a later run on that file would mistake the chapters for OBS markers. The copy is your clean original for re-runs and for step 7. Name the copy after the game, for example `Elden Ring test.mp4`: outside the inbox there is no game folder, so the file name is what turns on screen-text detection such as YOU DIED.
 - [ ] Put the recording in `1 Inbox\<Game>` and double-click `TeddyClip.bat`.
 - [ ] Write down the recording length and how long the run took. Compare the speed of the transcribing step with what you expect from the GPU (a GPU should be many times faster than real time; the CPU is much slower).
 - [ ] While it runs, watch Task Manager > Performance > GPU. Confirm the GPU is busy during transcribing and while clips are cut (the "Video Encode" graph moves when NVENC is used).
@@ -29,8 +29,10 @@ This matters most.
 - [ ] Count how many times you remember saying "clip that" (or use the OBS marker key).
 - [ ] Filter `moments.csv` for `kind` = `trigger` (and `marker`) and compare. Every one should be there with `keep` = yes.
 - [ ] Open each of those clips. Does the clip end just before "clip that" is said, and does it hold the funny part?
-- [ ] For any you said that are missing, find the spot in the recording and note what the transcript heard. Add that wording to `triggers` in `config.yaml` (for example a spelling like "clipped that", or a close sound-alike).
+- [ ] For any you said that are missing, find the spot in the recording and note what the transcript heard. Add that wording to `triggers` in `config.yaml` (for example a sound-alike such as "flip that"; "clipped that" is already understood). The transcript is `transcript.json` in the TeddyClip folder's `.cache`, in the folder whose name starts with the recording's file name.
 - [ ] **False triggers:** the phrase "clip" can come up in normal talk, for example a Counter-Strike magazine or a clip of ammo. Look for clips that start with `Clip that - ` but where nobody asked for a clip. Note the game, what was said, and how often it happens. If it is a problem, remove the loosest phrases (`clip it`, `clip this`) from `triggers` and keep only `clip that`.
+- [ ] **Made-up "clip that" in quiet stretches:** TeddyClip tells Whisper to listen for the trigger phrases (its "hotwords"), which helps it hear them but can make it write "clip that" where nobody said it, mostly over silence, menu music or game noise. For each `Clip that - ` clip, check that someone really said it at the end of the clip. If invented ones show up, note where (quiet or noisy parts) and how often.
+- [ ] **A "clip that" said in two sentences does not count:** TeddyClip only takes the phrase when its words follow each other within a second and are not split by a full stop, so "...nice clip. That was close" is ignored. If a real "clip that" was missed, check whether the transcript put a full stop between the words.
 
 ## 4. Rate the clips
 
@@ -54,7 +56,7 @@ This matters most.
 
 ## 7. Try two AI models
 
-- [ ] Use the copy of the original recording you made before the first run (step 2). Do not reuse the file in `Done`: it has chapters, which would be read as OBS markers and force extra clips, spoiling the comparison.
+- [ ] Use the copy of the original recording you made before the first run (step 2). Do not reuse the file in `Done`: it has chapters, which would be read as OBS markers and force extra clips, spoiling the comparison. Make sure the copy is named after the game (for example `Elden Ring test.mp4`), so screen-text detection still runs on a file outside the inbox.
 - [ ] For the first model, make sure `config.yaml` says `qwen3:4b` (the default) and run `.venv\Scripts\teddyclip process "<path to the copy>"`. Files outside the inbox are left in place, so the copy stays untouched. Note the name of the clip folder it makes.
 - [ ] Run `ollama pull gemma3:4b`, set `llm: model: gemma3:4b` in `config.yaml`, and run the same `teddyclip process "<path to the copy>"` command again. The second clip folder gets a ` (2)` on its name.
 - [ ] Compare the titles and scores of the top clips in the two `moments.csv` files. Record which one titled better and which found more quiet jokes, and keep that model in `config.yaml`.

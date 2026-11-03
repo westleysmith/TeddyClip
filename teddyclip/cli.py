@@ -186,7 +186,7 @@ def process_recording(path: Path, cfg: Config) -> Path:
             f"{path.name} has no sound track. "
             "Check OBS Settings > Output > Recording > Audio Track, then record again."
         )
-    cache =paths.cache / f"{path.name}-{stat.st_size}-{int(stat.st_mtime)}"
+    cache = paths.cache / f"{path.name}-{stat.st_size}-{int(stat.st_mtime)}"
     print("Extracting audio...")
     wav16 = extract_audio(path, cache / "audio16k.wav", WHISPER_RATE, cfg.audio_track)
     wav32 = extract_audio(path, cache / "audio32k.wav", PANNS_RATE, cfg.audio_track)

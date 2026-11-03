@@ -24,7 +24,7 @@ Score the slice from 1 to 10:
 Most slices should score 4 or lower. Be critical.
 
 Respond with ONLY valid JSON in exactly this shape, no other text:
-{{"score": 7, "quote": "the funniest line, copied word for word from the transcript"}}
+{{"quote": "the funniest line, copied word for word from the transcript", "score": 2}}
 
 If nothing is funny, use a low score and an empty string for the quote. Never invent a quote that is not in the transcript.
 

@@ -33,21 +33,23 @@ TITLE_CHARS = 60
 MAX_TRIM_SHARE = 0.5  # trims that would cut more than this of a window are ignored
 RERANK_BONUS = 6.0
 
+# The reason comes before the score in both schemas: Ollama fills the fields in
+# this order, so the model says what it found before it commits to a number.
 SWEEP_SCHEMA = {
     "type": "object",
-    "properties": {"score": {"type": "integer", "minimum": 1, "maximum": 10}, "quote": {"type": "string"}},
-    "required": ["score", "quote"],
+    "properties": {"quote": {"type": "string"}, "score": {"type": "integer", "minimum": 1, "maximum": 10}},
+    "required": ["quote", "score"],
 }
 LABEL_SCHEMA = {
     "type": "object",
     "properties": {
-        "score": {"type": "integer", "minimum": 1, "maximum": 10},
         "title": {"type": "string"},
         "why": {"type": "string"},
+        "score": {"type": "integer", "minimum": 1, "maximum": 10},
         "trim_start": {"type": "number"},
         "trim_end": {"type": "number"},
     },
-    "required": ["score", "title", "why", "trim_start", "trim_end"],
+    "required": ["title", "why", "score", "trim_start", "trim_end"],
 }
 ORDER_SCHEMA = {
     "type": "object",

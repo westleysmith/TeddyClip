@@ -81,7 +81,7 @@ TeddyClip\
 recording
   -> probe          duration, frame rate, audio tracks, OBS chapter markers (ffprobe)
   -> extract audio  16 kHz mono for whisper and features; 32 kHz for PANNs (ffmpeg)
-  -> transcribe     faster-whisper, word timestamps, cached
+  -> transcribe     faster-whisper, word timestamps, language from config (en), cached
   -> signals        per 1 second bin, normalized within the video
   -> candidates     peak windows from fused signals + forced trigger windows
   -> detectors      OCR on sampled frames inside candidate windows (if the game has a lexicon)
@@ -96,7 +96,7 @@ recording
 
 | Signal | How | Source |
 |---|---|---|
-| Trigger | Fuzzy match of trigger phrases ("clip that", "clip it", "clip this", configurable) over transcript words; time = phrase start | Ours |
+| Trigger | Word-level match of trigger phrases ("clip that", "clip it", "clip this", configurable) over transcript words, lowercase and punctuation stripped. The first word may be a close misspelling (difflib ratio at least 0.8, not an inflection such as "clips"), plus the one known mishear "clipped" before a "th" word ("clipped that"); every later word must match exactly. Consecutive words are at most 1 s apart, and no word but the last may end a sentence (. ! ?), so "...a clip. That was..." does not fire; a comma is fine. Repeats within 5 s collapse. Time = phrase start | Ours |
 | Marker | OBS chapter markers from the file | Ours |
 | Laughter / shouting | PANNs AudioSet tagger, 2 s window each second; Laughter, Belly laugh, Giggle, Chuckle, Snicker groups and a Scream/Shout/Yell group; each scored against its own rolling 90 s median | Clips Kitty `panns.py`, `game_audio.py` |
 | Loudness, spike, burst | RMS per second, ratio to rolling 30 s median, onset density | Clips Kitty `audio_features.py` |
@@ -199,6 +199,8 @@ people: [Teddy, Friend]            # used in titles
 triggers: ["clip that", "clip it", "clip this"]
 audio_track: null                  # e.g. 2 if mics are on their own OBS track
 whisper_model: auto                # large-v3-turbo on GPU, small on CPU
+whisper_device: auto               # auto (GPU when it works) or cpu (never use the GPU)
+language: en                       # spoken language for whisper; null lets whisper detect it
 llm:
   model: qwen3:4b                  # or "none"; final choice after testing
   url: http://127.0.0.1:11434
@@ -229,7 +231,10 @@ The model name above is a placeholder until tested.
 - Every external failure is reported in plain words with the fix, e.g. "ffmpeg not found: see README step 2" or "Ollama is not running: continuing without AI titles".
 - One bad recording never stops the batch; it stays in the inbox and the error is listed at the end.
 - A recording with no audio track is refused up front with a plain message ("has no sound track", with where to look in OBS) rather than producing empty results.
-- NVENC failure on a clip retries on CPU. CUDA failure in whisper falls back to CPU.
+- NVENC failure on a clip retries on CPU. CUDA failure in whisper falls back to CPU, and `whisper_device: cpu` skips the GPU entirely for PCs where it crashes.
+- The first Ollama problem (a refusal with the server's own error text, or a failure) is printed once. After 3 failed asks in a row the client turns itself off for the rest of that recording ("Ollama stopped answering: continuing without AI for this recording").
+- Before any clip is cut, the free space on the Done drive is checked against the recording's size, so a full disk fails early with a plain message. A run that fails after its clip folder was made renames it to "<name> (incomplete)", so the next run gets the clean name. The end-of-batch summary shows the last meaningful line of each error.
+- When OBS remuxed an .mkv to .mp4, the inbox holds both: the .mkv is skipped as a duplicate.
 - `teddyclip check` verifies ffmpeg, NVENC, CUDA for whisper, Ollama and the configured model, PANNs weights, OCR, and that the folders exist, printing a pass or fail list.
 
 ## 10. Testing
@@ -240,11 +245,11 @@ The model name above is a placeholder until tested.
 
 ## 11. Install (for the README)
 
-1. Python 3.11+ from python.org.
+1. Python 3.12 from python.org, not newer: rapidocr-onnxruntime 1.4.4 has no wheels for 3.13 or later, so `requires-python` is `>=3.11,<3.13`.
 2. `winget install Gyan.FFmpeg`.
 3. Ollama from ollama.com, then `ollama pull qwen3:4b` (the configured default, a starting point to be tested).
 4. Download TeddyClip (git clone or ZIP). In its folder: `py -3.12 -m venv .venv`, `.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu`, then `.venv\Scripts\pip install -e .`.
-5. On an NVIDIA PC, `.venv\Scripts\pip install -e .[gpu]` adds the CUDA 12 libraries faster-whisper needs (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`). GPU transcription needs these plus an up-to-date NVIDIA driver; without them everything still works on the CPU, slower. `cuda_usable()` asks CTranslate2 (not PyTorch, which is the CPU build) whether a GPU exists, and the DLL folders of those packages are added before a CUDA model loads. This path has not yet been tested on a real GPU.
+5. On an NVIDIA PC, `.venv\Scripts\pip install -e .[gpu]` adds the CUDA 12 libraries faster-whisper needs (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12==9.10.*`, matching CTranslate2, which is pinned to `>=4.8,<4.9`). GPU transcription needs these plus an up-to-date NVIDIA driver; without them everything still works on the CPU, slower. `cuda_usable()` asks CTranslate2 (not PyTorch, which is the CPU build) whether a GPU exists, and the DLL folders of those packages are added before a CUDA model loads. This path has not yet been tested on a real GPU.
 6. `.venv\Scripts\teddyclip check`, then use `TeddyClip.bat`. The first run downloads the whisper model and the PANNs weights.
 7. OBS setup page (`docs/obs-setup.md`): Hybrid MP4 output, optional chapter marker hotkey, optional separate mic track, recording path pointed at `1 Inbox`.
 
