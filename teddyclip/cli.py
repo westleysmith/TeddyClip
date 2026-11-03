@@ -459,6 +459,7 @@ def main(argv: list[str] | None = None) -> int:
     joined = commands.add_parser("highlight", help="join the clips left in a clip folder into a highlight video")
     joined.add_argument("folder", type=Path)
     commands.add_parser("check", help="check that ffmpeg, Ollama and the models are ready")
+    commands.add_parser("ui", help="open the TeddyClip page in your web browser")
     args = parser.parse_args(argv)
 
     config_path = args.config or Path.cwd() / "config.yaml"
@@ -475,6 +476,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "check":
         return 1 if check(cfg) else 0
+    if args.command == "ui":
+        from teddyclip.ui import serve
+        return serve(cfg)
     if args.command == "highlight":
         return highlight(args.folder, cfg)
     if args.command == "process":

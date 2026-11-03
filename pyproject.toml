@@ -30,6 +30,9 @@ teddyclip = "teddyclip.cli:main"
 [tool.setuptools]
 packages = ["teddyclip"]
 
+[tool.setuptools.package-data]
+teddyclip = ["ui.html"]
+
 [tool.pytest.ini_options]
 addopts = "-m 'not slow'"
 markers = ["slow: needs GPU, network, Ollama or model weights"]

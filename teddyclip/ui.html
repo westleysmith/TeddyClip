@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeddyClip</title>
+<style>
+  :root {
+    --bg: #111317; --panel: #1a1d23; --panel-2: #22262e; --line: #2d323c;
+    --text: #e9ecf1; --muted: #9aa3b2; --accent: #f2b33d; --accent-ink: #1b1405;
+    --red: #e5534b; --green: #57ab5a; --blue: #539bf5; --purple: #b083f0; --yellow: #d4a72c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px;
+           padding: 14px 24px; background: rgba(17,19,23,.94); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 auto 0 0; font-size: 22px; letter-spacing: .3px; }
+  header h1 span { color: var(--accent); }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 60px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+           padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: #4a5160; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: #ffb4ae; }
+  button.small { padding: 4px 10px; font-size: 13px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 18px; }
+  .muted { color: var(--muted); }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .inbox-list { margin: 8px 0 0; padding-left: 18px; }
+  .job h2 { margin: 0 0 8px; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+  .spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent);
+             border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .log { max-height: 220px; overflow: auto; margin: 0; padding: 10px 12px; background: #0c0e11;
+         border-radius: 8px; font: 12.5px/1.5 Consolas, monospace; color: #c9d1d9; white-space: pre-wrap; }
+  .session h2 { margin: 0; font-size: 18px; }
+  .session .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .session .head .spacer { flex: 1; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .clip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+          display: flex; flex-direction: column; }
+  .clip video, .highlight video { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; }
+  .clip .info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .clip .title { font-weight: 600; }
+  .clip .why { font-size: 13px; color: var(--muted); }
+  .clip .foot { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+  .clip .foot .spacer { flex: 1; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor; }
+  .k-trigger, .k-marker { color: var(--red); } .k-laughter { color: var(--yellow); }
+  .k-joke { color: var(--blue); } .k-game { color: var(--purple); } .k-loud { color: var(--green); }
+  .highlight { margin-bottom: 14px; max-width: 720px; }
+  .empty { text-align: center; padding: 40px 20px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #2b1c1c;
+           border: 1px solid var(--red); padding: 10px 16px; border-radius: 8px; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Teddy<span>Clip</span></h1>
+  <button id="add">Add recordings</button>
+  <button id="make" class="primary">Make clips</button>
+</header>
+<main>
+  <section class="panel" id="inbox"></section>
+  <section class="panel job" id="job" hidden>
+    <h2><span class="spinner" id="spin"></span><span id="job-name"></span></h2>
+    <pre class="log" id="log"></pre>
+  </section>
+  <div id="sessions"></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const KIND = {trigger: "Clip that", marker: "OBS marker", laughter: "Laughter", joke: "Joke", game: "Game event", loud: "Loud"};
+let busy = false, lastSessions = "", wasRunning = false;
+
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.style.display = "block";
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.style.display = "none"), 4000);
+}
+
+async function post(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) toast(data.error || "Something went wrong");
+  return r.ok;
+}
+
+function renderInbox(inbox) {
+  const ready = inbox.filter((f) => f.ready).length;
+  let html;
+  if (!inbox.length) {
+    html = `<div class="row"><b>Inbox is empty.</b><span class="muted">Click <i>Add recordings</i>, drop your OBS recordings in that folder (inside a folder named after the game if you like), then click <i>Make clips</i>.</span></div>`;
+  } else {
+    html = `<b>${inbox.length} recording${inbox.length === 1 ? "" : "s"} in the inbox</b>` +
+      `<ul class="inbox-list">${inbox.map((f) => `<li>${esc(f.name)}${f.ready ? "" : ' <span class="muted">(still being recorded or copied)</span>'}</li>`).join("")}</ul>`;
+  }
+  $("inbox").innerHTML = html;
+  $("make").disabled = busy || ready === 0;
+  $("make").title = ready ? "" : "Add a finished recording to the inbox first";
+}
+
+function renderJob(job) {
+  const show = job.running || job.lines.length > 0;
+  $("job").hidden = !show;
+  if (!show) return;
+  $("spin").style.display = job.running ? "" : "none";
+  $("job-name").textContent = job.running ? job.name + "..." : job.name + (job.failed ? ": finished with problems (see below)" : ": done");
+  const log = $("log"), atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = job.lines.join("\n");
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function clipCard(session, c) {
+  const kind = (c.kind ? `<span class="badge k-${esc(c.kind)}">${esc(KIND[c.kind] || c.kind)}</span>` : "") +
+    (c.events || []).map((e) => `<span class="badge k-game">${esc(e)}</span>`).join("");
+  return `<div class="clip">
+      <video src="${c.url}" controls preload="metadata"></video>
+      <div class="info">
+        <div class="title">${esc(c.title)}</div>
+        ${c.why && c.why !== c.kind ? `<div class="why">${esc(c.why)}</div>` : ""}
+        <div class="foot">${kind}<span class="muted">${esc(c.start)}</span><span class="spacer"></span>
+          <button class="small danger" data-delete="${esc(c.file)}" data-session="${esc(session)}">Delete</button></div>
+      </div></div>`;
+}
+
+function renderSessions(sessions) {
+  const key = JSON.stringify(sessions);
+  if (key === lastSessions) return;  // re-drawing would restart any video that is playing
+  lastSessions = key;
+  if (!sessions.length) {
+    $("sessions").innerHTML = `<div class="panel empty muted">No clips yet. Your clips will show up here after <b>Make clips</b>.</div>`;
+    return;
+  }
+  $("sessions").innerHTML = sessions.map((s) => `
+    <section class="panel session">
+      <div class="head">
+        <h2>${esc(s.name)}</h2>
+        <span class="muted">${s.clips.length} clip${s.clips.length === 1 ? "" : "s"}</span>
+        ${s.incomplete ? '<span class="badge k-trigger">did not finish</span>' : ""}
+        <span class="spacer"></span>
+        <button class="small" data-open="clips" data-session="${esc(s.name)}">Open folder</button>
+        <button class="small" data-highlight="${esc(s.name)}" ${s.clips.length ? "" : "disabled"}>${s.highlight ? "Remake highlight" : "Make highlight"}</button>
+      </div>
+      ${s.highlight ? `<div class="highlight"><div class="muted" style="margin-bottom:6px">Highlight video
+          <button class="small" data-open="highlights">Open folder</button></div>
+          <video src="${s.highlight}" controls preload="metadata"></video></div>` : ""}
+      ${s.clips.length ? `<div class="grid">${s.clips.map((c) => clipCard(s.name, c)).join("")}</div>`
+                       : '<div class="muted">No clips left in this folder.</div>'}
+    </section>`).join("");
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/state", {cache: "no-store"});
+    const st = await r.json();
+    busy = st.job.running;
+    if (wasRunning && !busy) lastSessions = "";  // a job just finished: show its results
+    wasRunning = busy;
+    renderInbox(st.inbox);
+    renderJob(st.job);
+    renderSessions(st.sessions);
+    document.querySelectorAll("[data-highlight]").forEach((b) => (b.disabled = busy || b.dataset.empty === "1"));
+  } catch (e) {
+    toast("TeddyClip is not running. Open it again from the desktop shortcut.");
+  }
+}
+
+$("add").onclick = () => post("/api/open", {folder: "inbox"});
+$("make").onclick = async () => { if (await post("/api/process")) refresh(); };
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.delete) {
+    if (!confirm(`Delete "${b.dataset.delete}"?\nIt goes to the Recycle Bin, so you can get it back.`)) return;
+    if (await post("/api/delete", {session: b.dataset.session, file: b.dataset.delete})) { lastSessions = ""; refresh(); }
+  } else if (b.dataset.highlight) {
+    if (await post("/api/highlight", {session: b.dataset.highlight})) refresh();
+  } else if (b.dataset.open) {
+    post("/api/open", {folder: b.dataset.open, session: b.dataset.session});
+  }
+});
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

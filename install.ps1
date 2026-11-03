@@ -194,17 +194,21 @@ $root = (& $venvPy -c "from teddyclip.config import load_config; c = load_config
 $desktop = [Environment]::GetFolderPath('Desktop')
 if ($SkipShortcuts) { $desktop = Join-Path $InstallDir 'shortcuts-test'; New-Item -ItemType Directory -Force $desktop | Out-Null }
 $shell = New-Object -ComObject WScript.Shell
-function Make-Shortcut($name, $target, $icon) {
+function Make-Shortcut($name, $target, $icon, $style = 1) {
     $lnk = $shell.CreateShortcut((Join-Path $desktop "$name.lnk"))
     $lnk.TargetPath = $target
     $lnk.WorkingDirectory = $InstallDir
     $lnk.IconLocation = $icon
+    $lnk.WindowStyle = $style
     $lnk.Save()
 }
-Make-Shortcut 'TeddyClip - Make Clips' (Join-Path $InstallDir 'TeddyClip.bat') 'shell32.dll,137'
-Make-Shortcut 'TeddyClip - Make Highlight' (Join-Path $InstallDir 'Highlight.bat') 'shell32.dll,115'
+# Shortcuts from earlier versions, now replaced by the TeddyClip page.
+foreach ($old in 'TeddyClip - Make Clips', 'TeddyClip - Make Highlight') {
+    Remove-Item (Join-Path $desktop "$old.lnk") -ErrorAction SilentlyContinue
+}
+Make-Shortcut 'TeddyClip' (Join-Path $InstallDir 'Open TeddyClip.bat') 'shell32.dll,137' 7
 Make-Shortcut 'TeddyClip Folders' $root 'shell32.dll,3'
-Write-Host "Added 3 shortcuts to the desktop."
+Write-Host "Added 2 shortcuts to the desktop: TeddyClip and TeddyClip Folders."
 
 Say "Checking everything"
 & (Join-Path $InstallDir '.venv\Scripts\teddyclip.exe') check
@@ -212,8 +216,8 @@ Say "Checking everything"
 Write-Host ""
 Write-Host "All done!" -ForegroundColor Green
 Write-Host "How to use it:"
-Write-Host "  1. Put a recording in the '1 Inbox' folder (open 'TeddyClip Folders' on the desktop)."
-Write-Host "  2. Double-click 'TeddyClip - Make Clips' and let it run."
-Write-Host "  3. Watch the clips in '2 Clips' and delete the ones you don't like."
-Write-Host "  4. Drag that clip folder onto 'TeddyClip - Make Highlight'."
+Write-Host "  1. Double-click 'TeddyClip' on the desktop. It opens in your web browser."
+Write-Host "  2. Click 'Add recordings' and put your OBS recordings in that folder."
+Write-Host "  3. Click 'Make clips' and let it run."
+Write-Host "  4. Watch the clips, delete the ones you don't like, then click 'Make highlight'."
 Write-Host "Tip: say 'clip that' out loud while recording and that moment always becomes a clip."
