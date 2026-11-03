@@ -81,8 +81,8 @@ recording
   -> extract audio  16 kHz mono for whisper and features; 32 kHz for PANNs (ffmpeg)
   -> transcribe     faster-whisper, word timestamps, cached
   -> signals        per 1 second bin, normalized within the video
-  -> detectors      OCR on sampled frames around candidate windows (if the game has a lexicon)
   -> candidates     peak windows from fused signals + forced trigger windows
+  -> detectors      OCR on sampled frames inside candidate windows (if the game has a lexicon)
   -> sweep          local model scores 2 minute transcript slices for jokes
   -> label          local model titles, scores and trims each candidate window
   -> rerank         local model orders the finalists head to head
@@ -109,7 +109,7 @@ recording
 ### 4.2 Candidate windows
 - **Trigger or OBS marker:** window = [t - 45 s, t - 0.3 s], ending just before the phrase so "clip that" is not in the clip. Always kept, never dropped by scoring or caps.
 - **Signal peak:** window from 20 s before to 15 s after the peak, expanded to sentence boundaries from the transcript.
-- **Screen event:** window from 30 s before to 15 s after.
+- **Screen events:** OCR runs only inside candidate windows, sampling a frame every 2 s, because scanning a whole 4 hour video on CPU is too slow. A hit (e.g. YOU DIED) is attached to the window and raises its score by the `screen_text` weight.
 - Overlapping windows merge. Duplicates are removed with Clips Kitty's three checks (time overlap over 40 percent, transcript text similarity over 70 percent, shared segments over 40 percent).
 - Lengths are clamped to 20 s to 120 s (configurable).
 
