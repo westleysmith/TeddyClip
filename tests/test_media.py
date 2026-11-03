@@ -110,15 +110,10 @@ def test_cut_duration(tiny_video, tmp_path):
 
 
 def test_cut_retries_on_cpu_when_hardware_encoder_fails(tiny_video, tmp_path, monkeypatch):
-    # No NVIDIA GPU here (or a driver that refuses the footage): the first encode fails.
-    bogus = ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
-    calls = []
-
-    def fake_encoder_args():
-        calls.append(1)
-        return bogus
-
-    monkeypatch.setattr(media, "encoder_args", fake_encoder_args)
+    # Deterministic on any host (GPU or not): these args always fail, and differ from CPU_ARGS.
+    failing = ["-c:v", "libx264", "-preset", "no_such_preset"]
+    assert failing != CPU_ARGS
+    monkeypatch.setattr(media, "encoder_args", lambda: list(failing))
     seen = []
     real_run = subprocess.run
 
@@ -131,7 +126,12 @@ def test_cut_retries_on_cpu_when_hardware_encoder_fails(tiny_video, tmp_path, mo
     assert abs(probe(out).duration - 2.0) < 0.15
     encodes = [c for c in seen if "-ss" in c and "-t" in c]
     assert len(encodes) == 2
-    assert "h264_nvenc" in encodes[0] and "libx264" in encodes[1] and "h264_nvenc" not in encodes[1]
+
+    def has_block(cmd, block):
+        return any(cmd[i:i + len(block)] == block for i in range(len(cmd)))
+
+    assert has_block(encodes[0], failing) and not has_block(encodes[0], CPU_ARGS)
+    assert has_block(encodes[1], CPU_ARGS) and "no_such_preset" not in encodes[1]
 
 
 def test_cut_failure_reports_ffmpeg_tail(tmp_path):
