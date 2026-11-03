@@ -123,3 +123,15 @@ def test_collapsed_run_keeps_first_copy_only():
     out = collapse_repetition_loops(segs)
     assert [s.text for s in out] == ["hello", "thank you."]
     assert out[1].start == 1
+
+
+@pytest.mark.parametrize("bad", ['[{"start": 0, "end": 1, "te', "{}", '[{"start": 0}]', '[{"start": 0, "end": 1, "text": "x", "words": [1]}]'])
+def test_corrupt_cache_is_a_miss_and_gets_replaced(tmp_path, monkeypatch, bad):
+    (tmp_path / "transcript.json").write_text(bad, encoding="utf-8")
+    model = FakeModel()
+    monkeypatch.setattr(transcribe_mod, "_load_model", lambda *a, **k: model)
+    segs = transcribe(tmp_path / "a.wav", tmp_path)
+    assert model.kwargs is not None and segs[0].text == "clip that"
+    cached = json.loads((tmp_path / "transcript.json").read_text(encoding="utf-8"))
+    assert cached[0]["text"] == "clip that"
+    assert not (tmp_path / "transcript.json.tmp").exists()

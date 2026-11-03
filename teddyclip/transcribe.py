@@ -268,6 +268,35 @@ def _run(model, wav: Path, hotwords: list[str] | None) -> list[Segment]:
     return segments
 
 
+def _read_cache(cache_path: Path) -> list[Segment] | None:
+    """The cached segments, or None when there is no usable cache.
+
+    A truncated or malformed file (a crash mid-write, a hand edit) counts as a
+    miss, so the recording is transcribed again instead of failing every run."""
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return None
+        return collapse_repetition_loops([
+            Segment(d["start"], d["end"], d["text"], [Word(**w) for w in d["words"]])
+            for d in data
+        ])
+    except (OSError, ValueError, KeyError, TypeError):   # ValueError covers bad JSON and bad UTF-8
+        return None
+
+
+def _write_cache(cache_path: Path, segments: list[Segment]) -> None:
+    """Write the cache atomically: a temp file in the same folder, then
+    os.replace, so a crash leaves the old file or none, never half of one."""
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cache_path.with_name(cache_path.name + ".tmp")
+    tmp.write_text(
+        json.dumps([dataclasses.asdict(s) for s in segments], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(tmp, cache_path)
+
+
 def transcribe(
     wav: Path,
     cache: Path,
@@ -282,12 +311,9 @@ def transcribe(
     listen for, so it spells them as given."""
     global _model
     cache_path = cache / "transcript.json"
-    if cache_path.exists():
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-        return collapse_repetition_loops([
-            Segment(d["start"], d["end"], d["text"], [Word(**w) for w in d["words"]])
-            for d in data
-        ])
+    cached = _read_cache(cache_path)
+    if cached is not None:
+        return cached
 
     print(f"  Loading whisper model '{model}'...")
     _model = _load_model(model, "auto")
@@ -303,11 +329,7 @@ def transcribe(
         segments = _run(_model, wav, hotwords)
 
     segments = collapse_repetition_loops(segments)
-    cache.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(
-        json.dumps([dataclasses.asdict(s) for s in segments], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    _write_cache(cache_path, segments)
     return segments
 
 
