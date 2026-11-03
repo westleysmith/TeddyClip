@@ -1,0 +1,390 @@
+# Adapted from Clips Kitty (https://github.com/ColinGPT9/clips-studio), AGPL-3.0-or-later, Copyright (C) 2026 ColinGPT9. Modified for TeddyClip.
+"""Local speech-to-text with faster-whisper, cached as JSON next to the other
+per-recording files so re-runs skip the expensive transcription step."""
+
+from __future__ import annotations
+
+import ctypes
+import dataclasses
+import gc
+import inspect
+import json
+import os
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class Word:
+    start: float
+    end: float
+    text: str
+
+
+@dataclass
+class Segment:
+    start: float
+    end: float
+    text: str
+    words: list[Word]
+
+
+def all_words(segments: list[Segment]) -> list[Word]:
+    """Every word of every segment, in order."""
+    return [w for seg in segments for w in seg.words]
+
+
+# GPU detection
+
+def _parse_arch(arch: str) -> tuple[int, int] | None:
+    """"sm_86" -> (8, 6). The last digit is the minor version and everything
+    before it is the major, which reads both sm_86 (8.6) and sm_120 (12.0)
+    correctly."""
+    if not arch.startswith("sm_"):
+        return None  # ignore "compute_*" PTX entries
+    digits = arch[3:]
+    if not digits.isdigit() or len(digits) < 2:
+        return None
+    return int(digits[:-1]), int(digits[-1])
+
+
+def _runs_on(arch: tuple[int, int], device: tuple[int, int]) -> bool:
+    """Whether code compiled for `arch` runs on a device of capability
+    `device`: same major version, at or below the device's minor. CUDA is
+    forward compatible within a major version but not across one."""
+    return arch[0] == device[0] and arch[1] <= device[1]
+
+
+def cuda_usable() -> tuple[bool, str]:
+    """(usable, reason): whether CUDA work will actually run here.
+
+    torch.cuda.is_available() only says a driver and a device exist. A GPU
+    outside the installed build's architecture list passes it and then dies at
+    the first inference with "no kernel image is available". The reason string
+    is always worth showing: "no GPU" and "GPU newer than this build" both mean
+    CPU, but have different fixes."""
+    try:
+        import torch
+    except Exception as e:
+        return False, f"PyTorch did not load ({type(e).__name__})"
+
+    try:
+        if not torch.cuda.is_available():
+            return False, "no CUDA GPU detected"
+
+        name = torch.cuda.get_device_name(0)
+        device = torch.cuda.get_device_capability(0)
+        archs = [a for a in (_parse_arch(a) for a in torch.cuda.get_arch_list()) if a]
+
+        # No architectures at all means a CPU-only build, which is what a plain
+        # `pip install torch` gives on Windows.
+        if not archs:
+            return False, f"{name} found, but this is a CPU-only PyTorch build"
+
+        if any(_runs_on(a, device) for a in archs):
+            return True, name
+
+        # Which side the card falls on decides the advice, so say it.
+        here = f"sm_{device[0]}{device[1]}"
+        if device < min(archs):
+            oldest = min(archs)
+            return False, (
+                f"{name} is compute capability {here}, which is older than the "
+                f"oldest this PyTorch build supports (sm_{oldest[0]}{oldest[1]})"
+            )
+        newest = max(archs)
+        return False, (
+            f"{name} is compute capability {here}, and this "
+            f"PyTorch build only goes up to sm_{newest[0]}{newest[1]}"
+        )
+    except Exception as e:
+        # A diagnostic must never take the caller down.
+        return False, f"could not check the GPU ({type(e).__name__})"
+
+
+# faster-whisper's engine, CTranslate2, is built against CUDA 12 and loads
+# cuBLAS 12 by name the first time it runs on the GPU, not when the model
+# loads. PyTorch ships CUDA 13 libraries, so cublas64_12.dll comes from
+# NVIDIA's nvidia-cublas-cu12 wheel or a CUDA 12 toolkit.
+_CUBLAS12 = ("cublasLt64_12.dll", "cublas64_12.dll")   # the first is the second's dependency
+_GPU_LIBRARY_ERROR = re.compile(r"cublas|cudnn|cuda", re.IGNORECASE)
+
+
+def _cublas12_dirs() -> list[Path]:
+    """Where cuBLAS 12 may be, the pip wheel's copy first."""
+    dirs: list[Path] = []
+    try:
+        import nvidia.cublas
+
+        dirs += [Path(p) / "bin" for p in nvidia.cublas.__path__]
+    except Exception:
+        pass  # no cuBLAS wheel installed: the other places are still looked at
+    if os.environ.get("CUDA_PATH"):
+        dirs.append(Path(os.environ["CUDA_PATH"]) / "bin")
+    dirs += [Path(p) for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    try:
+        import torch
+
+        dirs.append(Path(torch.__file__).parent / "lib")   # a CUDA 12 PyTorch had them
+    except Exception:
+        pass  # no PyTorch here: one place fewer to look
+    return dirs
+
+
+def _cuda12_blas(dirs: list[Path] | None = None, load=None) -> Path | None:
+    """The folder cuBLAS 12 was loaded from, or None when it is not here.
+
+    Loaded by full path, and its folder put first on PATH: CTranslate2's own
+    later load asks for it by name, which finds a copy already loaded, and
+    os.add_dll_directory alone does not reach that load. Not Windows: the
+    system's loader finds the libraries as it always has."""
+    if os.name != "nt":
+        return Path(".")
+    load = load or ctypes.WinDLL
+    for folder in (_cublas12_dirs() if dirs is None else dirs):
+        if not all((folder / name).is_file() for name in _CUBLAS12):
+            continue
+        try:
+            for name in _CUBLAS12:
+                load(str(folder / name))
+        except OSError as e:
+            print(f"  Whisper: could not load cuBLAS 12 from {folder} ({e})")
+            continue
+        os.environ["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
+        try:
+            os.add_dll_directory(str(folder))
+        except (OSError, AttributeError):
+            pass  # the libraries are loaded and the folder is on PATH already
+        return folder
+    return None
+
+
+# Model loading
+
+_model = None   # the loaded WhisperModel, kept between calls until release()
+
+
+def _on_gpu(model) -> bool:
+    """Whether a loaded Whisper model runs on the GPU (CTranslate2 says)."""
+    return getattr(getattr(model, "model", None), "device", "cpu") == "cuda"
+
+
+def _gpu_ready() -> tuple[bool, str]:
+    usable, reason = cuda_usable()
+    if not usable:
+        return False, reason
+    if _cuda12_blas() is None:
+        return False, "NVIDIA cuBLAS 12 (cublas64_12.dll) was not found"
+    return True, reason
+
+
+def _load_model(model_size: str, device: str = "auto"):
+    """A WhisperModel. device is "auto" (GPU when usable, else CPU), "cuda" or
+    "cpu". model_size "auto" means large-v3-turbo on the GPU and small on the
+    CPU."""
+    # Imported lazily: loading faster-whisper/ctranslate2 takes seconds and is
+    # not needed when the transcript is cached.
+    from faster_whisper import WhisperModel
+
+    if device in ("auto", "cuda"):
+        ready, reason = _gpu_ready()
+        if not ready:
+            if device == "cuda":
+                raise RuntimeError(f"GPU transcription is not possible: {reason}")
+            print(f"  Whisper: GPU not used ({reason}). Transcribing on the CPU, which is slower.")
+        else:
+            try:
+                # large-v3-turbo: large-v3 accuracy with a 4-layer decoder.
+                # Falls back to small if it cannot be loaded.
+                names = ("large-v3-turbo", "small") if model_size == "auto" else (model_size,)
+                last_error: Exception | None = None
+                for name in names:
+                    try:
+                        model = WhisperModel(name, device="cuda", compute_type="float16")
+                        print(f"  Whisper: GPU (CUDA) active, model '{name}'")
+                        return model
+                    except Exception as e:
+                        last_error = e
+                raise last_error
+            except Exception as e:
+                if device == "cuda":
+                    raise  # the GPU was demanded by name: do not silently downgrade
+                print(f"  Whisper: GPU unavailable ({str(e)[:90]}), using the CPU")
+    if model_size == "auto":
+        model_size = "small"  # on the CPU, bigger models are several times slower
+    return WhisperModel(model_size, device="cpu", compute_type="int8")
+
+
+def release() -> None:
+    """Free the model and the GPU memory it held, so Ollama can use the GPU."""
+    global _model
+    _model = None
+    gc.collect()
+    torch = sys.modules.get("torch")   # never imported means nothing to free
+    if torch is not None:
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass  # freeing is best effort
+
+
+# Transcription
+
+def _run(model, wav: Path, hotwords: list[str] | None) -> list[Segment]:
+    """One pass of Whisper over the audio."""
+    options: dict = {}
+    if hotwords:
+        # Older faster-whisper releases have no hotwords argument.
+        if "hotwords" in inspect.signature(model.transcribe).parameters:
+            options["hotwords"] = " ".join(hotwords)
+    raw_segments, info = model.transcribe(
+        str(wav),
+        vad_filter=True,
+        # Greedy decoding is much faster than beam 5 with near-identical output.
+        beam_size=1,
+        # Do not feed the previous window's text back in: on long recordings
+        # with music or noise that is what causes repeated-sentence loops.
+        condition_on_previous_text=False,
+        word_timestamps=True,
+        **options,
+    )
+
+    segments: list[Segment] = []
+    for seg in raw_segments:  # generator: transcription happens here
+        segments.append(Segment(
+            start=round(seg.start, 2),
+            end=round(seg.end, 2),
+            text=seg.text.strip(),
+            words=[
+                Word(round(w.start, 2), round(w.end, 2), w.word.strip())
+                for w in (seg.words or [])
+            ],
+        ))
+        print(f"\r  Transcribed up to {seg.end:7.1f}s", end="", flush=True)
+    print()
+    return segments
+
+
+def transcribe(
+    wav: Path,
+    cache: Path,
+    model: str = "auto",
+    hotwords: list[str] | None = None,
+) -> list[Segment]:
+    """Segments with word timings for `wav`, cached as cache/transcript.json.
+
+    A cached transcript is returned without loading any model. model "auto"
+    picks large-v3-turbo on a usable GPU and small on the CPU; a GPU that fails
+    during the run is retried on the CPU. hotwords are names Whisper is told to
+    listen for, so it spells them as given."""
+    global _model
+    cache_path = cache / "transcript.json"
+    if cache_path.exists():
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        return collapse_repetition_loops([
+            Segment(d["start"], d["end"], d["text"], [Word(**w) for w in d["words"]])
+            for d in data
+        ])
+
+    print(f"  Loading whisper model '{model}'...")
+    _model = _load_model(model, "auto")
+    try:
+        segments = _run(_model, wav, hotwords)
+    except RuntimeError as e:
+        # The GPU's libraries are only loaded at the first encode, after the
+        # model has loaded, so a GPU that loads can still fail here.
+        if not _on_gpu(_model) or not _GPU_LIBRARY_ERROR.search(str(e)):
+            raise
+        print(f"\n  Whisper: the GPU failed ({str(e)[:120]}); transcribing again on the CPU")
+        _model = _load_model(model, "cpu")
+        segments = _run(_model, wav, hotwords)
+
+    segments = collapse_repetition_loops(segments)
+    cache.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        json.dumps([dataclasses.asdict(s) for s in segments], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return segments
+
+
+# Repetition loops
+
+# Inside one segment, a loop is a long span, a lot of words, and almost no
+# vocabulary. All three must hold: sparse speech has a normal unique-word
+# ratio, and a genuine chant is short because its pauses become segment
+# boundaries.
+_LOOP_MIN_SECONDS = 25.0
+_LOOP_MIN_WORDS = 40
+_LOOP_MAX_UNIQUE_RATIO = 0.15
+# Across segments, Whisper on silence or noise also emits the same short line
+# ("thank you") as many consecutive segments. Real speech rarely repeats one
+# line this often back to back.
+_LOOP_MIN_RUN = 4
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+
+
+def _collapse_within_segment(seg: Segment) -> Segment:
+    """A copy of `seg` with a one-segment repetition loop collapsed, or `seg`
+    itself when it is not one.
+
+    Keeps the first instance of each distinct sentence and trims the duplicated
+    word timings, so captions read correctly and the rest of the span is
+    treated as what it is: not speech."""
+    words = seg.words
+    if seg.end - seg.start < _LOOP_MIN_SECONDS or len(words) < _LOOP_MIN_WORDS:
+        return seg
+    tokens = [w.text.strip(" .,!?").lower() for w in words if w.text]
+    if not tokens or len(set(tokens)) / len(tokens) > _LOOP_MAX_UNIQUE_RATIO:
+        return seg
+
+    seen: set[str] = set()
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", seg.text.strip()):
+        key = _normalize(sentence)
+        if key and key not in seen:
+            seen.add(key)
+            kept.append(sentence.strip())
+    # A loop usually gets cut off mid-phrase, leaving a stub that is not a
+    # sentence and reads like a typo.
+    if len(kept) > 1 and len(kept[-1].split()) < 2:
+        kept.pop()
+    if not kept:
+        return seg
+
+    text = " ".join(kept)
+    keep_n = min(len(words), max(1, len(text.split())))
+    kept_words = words[:keep_n]
+    return Segment(seg.start, round(max(kept_words[-1].end, seg.start + 0.5), 2), text, kept_words)
+
+
+def collapse_repetition_loops(segments: list[Segment]) -> list[Segment]:
+    """Segments with Whisper repetition loops removed (the input is not changed).
+
+    Two shapes are handled: one long segment that repeats a phrase inside
+    itself, and a run of at least four consecutive segments with identical
+    text, of which only the first is kept."""
+    out: list[Segment] = []
+    run_key = None
+    run_len = 0
+    for seg in segments:
+        seg = _collapse_within_segment(seg)
+        key = _normalize(seg.text)
+        if key and key == run_key:
+            run_len += 1
+            # Reaching the threshold makes the whole run a loop: drop the copies
+            # already appended after the first. Shorter runs are kept as said.
+            if run_len == _LOOP_MIN_RUN:
+                del out[-(_LOOP_MIN_RUN - 2):]
+            if run_len >= _LOOP_MIN_RUN:
+                continue
+        else:
+            run_key, run_len = key, 1
+        out.append(seg)
+    return out

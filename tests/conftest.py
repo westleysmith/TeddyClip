@@ -32,3 +32,26 @@ def tiny_video(tmp_path) -> Path:
         check=True,
     )
     return out
+
+
+@pytest.fixture
+def tiny_speech_wav(tmp_path) -> Path:
+    """WAV of Windows SAPI saying "clip that". Skips when SAPI is unavailable."""
+    out = tmp_path / "speech.wav"
+    script = (
+        "Add-Type -AssemblyName System.Speech; "
+        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        f"$s.SetOutputToWaveFile('{str(out).replace(chr(39), chr(39) * 2)}'); "
+        "$s.Speak('clip that'); "
+        "$s.Dispose()"
+    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            check=True, capture_output=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("Windows SAPI speech synthesis unavailable")
+    if not out.is_file() or out.stat().st_size == 0:
+        pytest.skip("Windows SAPI produced no audio")
+    return out
