@@ -55,3 +55,83 @@ def tiny_speech_wav(tmp_path) -> Path:
     if not out.is_file() or out.stat().st_size == 0:
         pytest.skip("Windows SAPI produced no audio")
     return out
+
+
+def stage_in_inbox(video: Path, cfg: Config, game: str | None = None, name: str | None = None) -> Path:
+    """Copy `video` into the inbox (inside a game subfolder when `game` is given)."""
+    folder = cfg.paths.inbox / game if game else cfg.paths.inbox
+    folder.mkdir(parents=True, exist_ok=True)
+    dst = folder / (name or video.name)
+    shutil.copy2(video, dst)
+    return dst
+
+
+@pytest.fixture
+def fake_pipeline(monkeypatch):
+    """Replace the heavy pipeline steps at the names cli.py uses, so a run needs
+    no model weights, GPU, network or Ollama (ffmpeg still runs for real).
+
+    Active as soon as a test asks for it; call it to change the fake recording:
+    `trigger_at` puts the words "clip that" in the transcript at that second,
+    `flat_signals=True` makes every audio signal zero."""
+    import wave
+
+    import numpy as np
+
+    from teddyclip import cli
+    from teddyclip.transcribe import Segment, Word
+
+    state = {"trigger_at": None, "flat": False}
+
+    def seconds(wav: Path) -> int:
+        with wave.open(str(wav), "rb") as f:
+            return f.getnframes() // f.getframerate()
+
+    def transcribe(wav, cache, model="auto", hotwords=None):
+        t = state["trigger_at"]
+        if t is None:
+            return []
+        words = [Word(t, t + 0.3, "Clip"), Word(t + 0.3, t + 0.7, "that!")]
+        return [Segment(t, t + 0.7, "Clip that!", words)]
+
+    def audio_features(wav16k):
+        n = seconds(wav16k)
+        loud = np.zeros(n, dtype=np.float32) if state["flat"] else np.linspace(0.1, 1.0, n, dtype=np.float32)
+        return {"loudness": loud, "spike": loud.copy(), "burst": np.zeros(n, np.float32), "noisiness": np.zeros(n, np.float32)}
+
+    def people_sounds(wav32k, tagger):
+        n = seconds(wav32k)
+        laughter = np.zeros(n, dtype=np.float32)
+        if not state["flat"] and n > 3:
+            laughter[3] = 1.0
+        return {"laughter": laughter, "shout": np.zeros(n, dtype=np.float32)}
+
+    def ask(self, prompt, schema):
+        keys = set(schema.get("properties", {}))
+        if "order" in keys:
+            return {"order": [0]}
+        if "title" in keys:
+            return {"score": 7, "title": "Fake title", "why": "a test", "trim_start": 0, "trim_end": 0}
+        return {"score": 1 if state["flat"] else 6, "quote": ""}
+
+    real_screen_events = cli.screen_events
+
+    def screen_events(video, moments, lexicon, weight=0.6, **kwargs):
+        # Real frame reads through ffmpeg; the OCR model is replaced by one that reads nothing.
+        return real_screen_events(video, moments, lexicon, weight, ocr=lambda img: ([], 0.0), **kwargs)
+
+    monkeypatch.setattr(cli, "transcribe", transcribe)
+    monkeypatch.setattr(cli, "release", lambda: None)
+    monkeypatch.setattr(cli, "audio_features", audio_features)
+    monkeypatch.setattr(cli, "people_sounds", people_sounds)
+    monkeypatch.setattr(cli, "ensure_assets", lambda models: (Path(models) / "w.pth", Path(models) / "l.csv"))
+    monkeypatch.setattr(cli, "Tagger", lambda weights, labels: object())
+    monkeypatch.setattr(cli, "screen_events", screen_events)
+    monkeypatch.setattr(cli.LLM, "available", lambda self: True)
+    monkeypatch.setattr(cli.LLM, "ask", ask)
+
+    def configure(trigger_at: float | None = None, flat_signals: bool = False) -> None:
+        state["trigger_at"] = trigger_at
+        state["flat"] = flat_signals
+
+    return configure
