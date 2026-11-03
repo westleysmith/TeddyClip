@@ -87,8 +87,9 @@ def test_inbox_picks_only_finished_videos(cfg, monkeypatch, capsys):
     assert "1 processed, 0 failed" in capsys.readouterr().out
 
 
-def test_check_reports_missing_ffmpeg(cfg, monkeypatch, capsys):
+def test_check_reports_missing_ffmpeg(cfg, monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "empty"))
     assert check(cfg) >= 1 and "ffmpeg not found" in capsys.readouterr().out
 
 

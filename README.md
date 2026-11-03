@@ -18,9 +18,23 @@ TeddyClip is a personal auto-clipper for long gaming recordings with commentary.
 4. **Cut clips** named by timestamp and what happened, write a `moments.csv` and a DaVinci Resolve marker file, then move the original recording to `Done` with chapters added.
 5. **Review** by deleting the clips you don't want, then build a highlight video with YouTube chapters. NVIDIA NVENC is used when available.
 
-## Quick start (Windows)
+## Easy install (Windows, recommended)
 
-An NVIDIA GPU makes it faster but is not required. Everything below is done once.
+No typing needed. On Windows 10 or 11:
+
+1. Download [`Install TeddyClip.bat`](https://raw.githubusercontent.com/westleysmith/TeddyClip/main/Install%20TeddyClip.bat) (right-click the link, choose "Save link as"), or get the file from whoever set TeddyClip up for you.
+2. Double-click it. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. If it asks whether the app may make changes, click **Yes**.
+3. Type your two names when it asks (they go in clip titles), then leave the window open. The first install downloads a few GB and can take 20 to 40 minutes.
+4. When it says **All done!**, three shortcuts are on your desktop:
+   - **TeddyClip Folders** opens the folder where recordings go in and clips come out.
+   - **TeddyClip - Make Clips** turns everything in `1 Inbox` into clips.
+   - **TeddyClip - Make Highlight**: drag a clip folder onto it to make the highlight video.
+
+It installs Python 3.12, FFmpeg and Ollama (with winget), puts TeddyClip in `%LOCALAPPDATA%\TeddyClip-app`, adds GPU support when it finds an NVIDIA card, and downloads the AI models so the first run starts straight away. Run it again any time to update TeddyClip; your settings in `config.yaml` are kept.
+
+## Manual install (Windows)
+
+The same steps by hand, for developers. An NVIDIA GPU makes it faster but is not required. Everything below is done once.
 
 1. **Python 3.12** from [python.org](https://www.python.org/downloads/release/): pick the latest 3.12 release (3.12, not newer: one of the libraries TeddyClip uses does not install on 3.13 or later yet). Tick "Add python.exe to PATH" in the installer.
 2. **FFmpeg.** Open a Command Prompt or PowerShell window and run:

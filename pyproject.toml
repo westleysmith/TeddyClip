@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Turn long OBS gameplay recordings into clips and highlights"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
-license = { text = "AGPL-3.0-or-later" }
+license = "AGPL-3.0-or-later"
 dependencies = [
     "faster-whisper",
     "ctranslate2>=4.8,<4.9",

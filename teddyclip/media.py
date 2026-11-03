@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -49,10 +50,25 @@ class Probe:
     chapters: list[Chapter] = field(default_factory=list)
 
 
-def _tool(name: str) -> str:
+def find_tool(name: str) -> str | None:
+    """Path to ffmpeg or ffprobe. Falls back to where winget installs FFmpeg,
+    because a program started right after the installer (or before a restart)
+    may not see the new PATH yet."""
     path = shutil.which(name)
+    if path:
+        return path
+    winget = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet"
+    if not winget.parent.parent.name:
+        return None
+    candidates = [winget / "Links" / f"{name}.exe",
+                  *sorted((winget / "Packages").glob(f"Gyan.FFmpeg*/*/bin/{name}.exe"))]
+    return next((str(p) for p in candidates if p.is_file()), None)
+
+
+def _tool(name: str) -> str:
+    path = find_tool(name)
     if path is None:
-        raise RuntimeError("ffmpeg not found: see README step 2")
+        raise RuntimeError("ffmpeg not found: run Install TeddyClip.bat again, or see README step 2")
     return path
 
 

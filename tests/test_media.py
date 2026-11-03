@@ -161,3 +161,14 @@ def test_concat_two_cuts(tiny_video, tmp_path):
     a = cut(tiny_video, 0, 3, tmp_path / "it's a.mp4")
     b = cut(tiny_video, 5, 8, tmp_path / "b.mp4")
     assert abs(probe(concat([a, b], tmp_path / "j.mp4")).duration - 6.0) < 0.3
+
+
+def test_find_tool_falls_back_to_winget_folder(tmp_path, monkeypatch):
+    # Right after the installer runs, a new ffmpeg may not be on PATH yet.
+    bin_dir = tmp_path / "Microsoft" / "WinGet" / "Packages" / "Gyan.FFmpeg_x" / "ffmpeg-9-full_build" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "ffprobe.exe").write_bytes(b"")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert media.find_tool("ffprobe") == str(bin_dir / "ffprobe.exe")
+    assert media.find_tool("ffmpeg") is None

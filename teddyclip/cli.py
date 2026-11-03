@@ -17,7 +17,7 @@ import yaml
 from teddyclip.config import Config, load_config
 from teddyclip.detectors import Lexicon, game_profile, screen_events
 from teddyclip.llm import LLM
-from teddyclip.media import CPU_ARGS, encoder_args, extract_audio, probe
+from teddyclip.media import CPU_ARGS, encoder_args, extract_audio, find_tool, probe
 from teddyclip.moments import (
     forced_windows,
     label,
@@ -371,7 +371,7 @@ def check(cfg: Config) -> int:
     Returns the number of problems that stop TeddyClip working fully."""
     failures = 0
 
-    has_ffmpeg = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+    has_ffmpeg = bool(find_tool("ffmpeg") and find_tool("ffprobe"))
     if has_ffmpeg:
         _line("ok", "ffmpeg and ffprobe found")
         if encoder_args() != CPU_ARGS:
