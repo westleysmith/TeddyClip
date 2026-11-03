@@ -25,3 +25,30 @@ def test_user_placeholder_and_folder_names(tmp_path, monkeypatch):
     assert str(paths.inbox).endswith(r"teddy\TeddyClip\1 Inbox")
     assert paths.clips.name == "2 Clips" and paths.highlights.name == "3 Highlights"
     assert paths.done.name == "Done" and paths.cache.name == ".cache"
+
+
+def test_language_defaults_to_english_and_null_means_auto_detect(tmp_path):
+    assert load_config(tmp_path / "missing.yaml").language == "en"
+    p = tmp_path / "c.yaml"
+    p.write_text("language: null\n", encoding="utf-8")
+    assert load_config(p).language is None
+    p.write_text("language: de\n", encoding="utf-8")
+    assert load_config(p).language == "de"
+
+
+def test_whisper_device_defaults_to_auto(tmp_path):
+    assert load_config(tmp_path / "missing.yaml").whisper_device == "auto"
+    p = tmp_path / "c.yaml"
+    p.write_text("whisper_device: cpu\n", encoding="utf-8")
+    assert load_config(p).whisper_device == "cpu"
+
+
+def test_pyproject_pins_python_and_the_gpu_libraries():
+    import tomllib
+    from pathlib import Path
+
+    project = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    # rapidocr-onnxruntime 1.4.4 has no wheels for Python 3.13 or newer.
+    assert project["requires-python"] == ">=3.11,<3.13"
+    assert "ctranslate2>=4.8,<4.9" in project["dependencies"]
+    assert project["optional-dependencies"]["gpu"] == ["nvidia-cublas-cu12", "nvidia-cudnn-cu12==9.10.*"]

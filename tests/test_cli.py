@@ -148,3 +148,30 @@ def test_process_outside_the_inbox_keeps_the_original(fake_pipeline, tiny_video,
     assert src.exists()
     assert (cfg.paths.done / f"{date} session.mp4").exists()
     assert any("Clip that" in p.name for p in (cfg.paths.clips / f"{date} session").glob("*.mp4"))
+
+
+def test_process_recording_passes_language_and_device_to_whisper(fake_pipeline, tiny_video, cfg):
+    state = fake_pipeline(trigger_at=8.0)
+    cfg.language, cfg.whisper_device = None, "cpu"
+    process_recording(stage_in_inbox(tiny_video, cfg), cfg)
+    assert state["transcribe_calls"] == [{"model": "auto", "language": None, "device": "cpu"}]
+
+
+def test_check_with_whisper_device_cpu_skips_the_gpu(cfg, monkeypatch, capsys):
+    cfg.whisper_device = "cpu"
+    monkeypatch.setattr(cli, "gpu_ready", lambda: (_ for _ in ()).throw(AssertionError("GPU checked")))
+    check(cfg)
+    assert "whisper_device: cpu" in capsys.readouterr().out
+
+
+def test_check_prints_whisper_device_auto(cfg, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "gpu_ready", lambda: (False, "no NVIDIA GPU with a working driver was found"))
+    check(cfg)
+    assert "whisper_device: auto" in capsys.readouterr().out
+
+
+def test_bad_whisper_device_is_a_config_error(tmp_path, capsys):
+    bad = tmp_path / "config.yaml"
+    bad.write_text("whisper_device: gpu\n", encoding="utf-8")
+    assert main(["--config", str(bad), "check"]) == 2
+    assert "whisper_device" in capsys.readouterr().out

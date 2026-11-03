@@ -7,10 +7,11 @@ name = "teddyclip"
 version = "0.1.0"
 description = "Turn long OBS gameplay recordings into clips and highlights"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 license = { text = "AGPL-3.0-or-later" }
 dependencies = [
     "faster-whisper",
+    "ctranslate2>=4.8,<4.9",
     "av<19",
     "numpy",
     "pyyaml",
@@ -21,7 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
-gpu = ["nvidia-cublas-cu12", "nvidia-cudnn-cu12>=9,<10"]
+gpu = ["nvidia-cublas-cu12", "nvidia-cudnn-cu12==9.10.*"]
 
 [project.scripts]
 teddyclip = "teddyclip.cli:main"

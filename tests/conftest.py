@@ -81,13 +81,14 @@ def fake_pipeline(monkeypatch):
     from teddyclip import cli
     from teddyclip.transcribe import Segment, Word
 
-    state = {"trigger_at": None, "flat": False}
+    state = {"trigger_at": None, "flat": False, "transcribe_calls": []}
 
     def seconds(wav: Path) -> int:
         with wave.open(str(wav), "rb") as f:
             return f.getnframes() // f.getframerate()
 
-    def transcribe(wav, cache, model="auto", hotwords=None):
+    def transcribe(wav, cache, model="auto", hotwords=None, language="en", device="auto"):
+        state["transcribe_calls"].append({"model": model, "language": language, "device": device})
         t = state["trigger_at"]
         if t is None:
             return []
@@ -130,8 +131,9 @@ def fake_pipeline(monkeypatch):
     monkeypatch.setattr(cli.LLM, "available", lambda self: True)
     monkeypatch.setattr(cli.LLM, "ask", ask)
 
-    def configure(trigger_at: float | None = None, flat_signals: bool = False) -> None:
+    def configure(trigger_at: float | None = None, flat_signals: bool = False) -> dict:
         state["trigger_at"] = trigger_at
         state["flat"] = flat_signals
+        return state
 
     return configure

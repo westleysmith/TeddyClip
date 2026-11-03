@@ -231,8 +231,8 @@ def release() -> None:
 
 # Transcription
 
-def _run(model, wav: Path, hotwords: list[str] | None) -> list[Segment]:
-    """One pass of Whisper over the audio."""
+def _run(model, wav: Path, hotwords: list[str] | None, language: str | None = "en") -> list[Segment]:
+    """One pass of Whisper over the audio. language None lets Whisper detect it."""
     options: dict = {}
     if hotwords:
         # Older faster-whisper releases have no hotwords argument.
@@ -240,6 +240,9 @@ def _run(model, wav: Path, hotwords: list[str] | None) -> list[Segment]:
             options["hotwords"] = " ".join(hotwords)
     raw_segments, info = model.transcribe(
         str(wav),
+        # Telling Whisper the language skips its guess from the first 30 s,
+        # which on a gaming recording is often game music or menu noise.
+        language=language,
         vad_filter=True,
         # Greedy decoding is much faster than beam 5 with near-identical output.
         beam_size=1,
@@ -300,13 +303,16 @@ def transcribe(
     cache: Path,
     model: str = "auto",
     hotwords: list[str] | None = None,
+    language: str | None = "en",
+    device: str = "auto",
 ) -> list[Segment]:
     """Segments with word timings for `wav`, cached as cache/transcript.json.
 
     A cached transcript is returned without loading any model. model "auto"
     picks large-v3-turbo on a usable GPU and small on the CPU; a GPU that fails
-    during the run is retried on the CPU. hotwords are names Whisper is told to
-    listen for, so it spells them as given."""
+    during the run is retried on the CPU. device "cpu" never touches the GPU.
+    hotwords are names Whisper is told to listen for, so it spells them as
+    given. language is the spoken language ("en"); None lets Whisper detect it."""
     global _model
     cache_path = cache / "transcript.json"
     cached = _read_cache(cache_path)
@@ -314,9 +320,9 @@ def transcribe(
         return cached
 
     print(f"  Loading whisper model '{model}'...")
-    _model = _load_model(model, "auto")
+    _model = _load_model(model, "cpu" if device == "cpu" else "auto")
     try:
-        segments = _run(_model, wav, hotwords)
+        segments = _run(_model, wav, hotwords, language)
     except RuntimeError as e:
         # The GPU's libraries are only loaded at the first encode, after the
         # model has loaded, so a GPU that loads can still fail here.
@@ -324,7 +330,7 @@ def transcribe(
             raise
         print(f"\n  Whisper: the GPU failed ({str(e)[:120]}); transcribing again on the CPU")
         _model = _load_model(model, "cpu")
-        segments = _run(_model, wav, hotwords)
+        segments = _run(_model, wav, hotwords, language)
 
     segments = collapse_repetition_loops(segments)
     _write_cache(cache_path, segments)

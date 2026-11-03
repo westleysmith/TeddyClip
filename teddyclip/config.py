@@ -72,6 +72,8 @@ class Config:
     triggers: list[str] = field(default_factory=_default_triggers)
     audio_track: int | None = None
     whisper_model: str = "auto"
+    whisper_device: str = "auto"  # "auto" (GPU when usable) or "cpu" (never touch the GPU)
+    language: str | None = "en"  # spoken language for whisper; None means detect it
     llm_model: str = "qwen3:4b"
     llm_url: str = "http://127.0.0.1:11434"
     min_seconds: float = 20
@@ -103,6 +105,8 @@ _FLAT_KEYS: dict[str, tuple[str | None, str]] = {
     "triggers": (None, "triggers"),
     "audio_track": (None, "audio_track"),
     "whisper_model": (None, "whisper_model"),
+    "whisper_device": (None, "whisper_device"),
+    "language": (None, "language"),
     "llm_model": ("llm", "model"),
     "llm_url": ("llm", "url"),
     "min_seconds": ("clips", "min_seconds"),

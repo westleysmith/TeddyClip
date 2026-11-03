@@ -50,6 +50,7 @@ from teddyclip.signals import (
 from teddyclip.transcribe import all_words, gpu_ready, release, transcribe
 
 VIDEO_SUFFIXES = {".mp4", ".mkv"}
+WHISPER_DEVICES = ("auto", "cpu")
 QUIET_SECONDS = 60
 
 
@@ -155,7 +156,8 @@ def process_recording(path: Path, cfg: Config) -> Path:
     wav32 = extract_audio(path, cache / "audio32k.wav", PANNS_RATE, cfg.audio_track)
 
     print("Transcribing...")
-    segments = transcribe(wav16, cache, cfg.whisper_model, hotwords=cfg.triggers)
+    segments = transcribe(wav16, cache, cfg.whisper_model, hotwords=cfg.triggers,
+                          language=cfg.language, device=cfg.whisper_device)
     release()  # frees the GPU before Ollama is asked anything
 
     print("Measuring loudness...")
@@ -318,11 +320,14 @@ def check(cfg: Config) -> int:
         _line("fail", "ffmpeg not found: run 'winget install Gyan.FFmpeg', then open a new window (README step 2)")
         _line("info", "NVENC not checked, because it needs ffmpeg")
 
-    usable, reason = gpu_ready()
-    if usable:
-        _line("ok", f"CUDA for whisper: {reason}")
+    if cfg.whisper_device == "cpu":
+        _line("info", "whisper_device: cpu in config.yaml, so whisper transcribes on the CPU and the GPU is not checked")
     else:
-        _line("info", f"Whisper will transcribe on the CPU, which is slower: {reason}")
+        usable, reason = gpu_ready()
+        if usable:
+            _line("ok", f"CUDA for whisper (whisper_device: auto): {reason}")
+        else:
+            _line("info", f"Whisper will transcribe on the CPU, which is slower (whisper_device: auto): {reason}")
 
     if cfg.llm_model == "none":
         _line("info", "AI titles are turned off (llm model is \"none\" in config.yaml)")
@@ -370,6 +375,10 @@ def check(cfg: Config) -> int:
 
 def _check_config(cfg: Config) -> None:
     """Raise ValueError with a plain message for settings that would fail later."""
+    if cfg.whisper_device not in WHISPER_DEVICES:
+        raise ValueError(f"whisper_device must be auto or cpu, not {cfg.whisper_device!r}")
+    if cfg.language is not None and not (isinstance(cfg.language, str) and cfg.language.strip()):
+        raise ValueError(f"language must be a language code like en, or null to detect it, not {cfg.language!r}")
     for name, value in cfg.weights.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"weights: {name} must be a number like 0.6, not {value!r}")

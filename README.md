@@ -22,7 +22,7 @@ TeddyClip is a personal auto-clipper for long gaming recordings with commentary.
 
 An NVIDIA GPU makes it faster but is not required. Everything below is done once.
 
-1. **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/). Tick "Add python.exe to PATH" in the installer.
+1. **Python 3.12** from [python.org](https://www.python.org/downloads/release/): pick the latest 3.12 release (3.12, not newer: one of the libraries TeddyClip uses does not install on 3.13 or later yet). Tick "Add python.exe to PATH" in the installer.
 2. **FFmpeg.** Open a Command Prompt or PowerShell window and run:
    ```
    winget install Gyan.FFmpeg
@@ -40,7 +40,7 @@ An NVIDIA GPU makes it faster but is not required. Everything below is done once
    .venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu
    .venv\Scripts\pip install -e .
    ```
-   If you installed a different Python version, change `-3.12` to match (3.11 or newer). The second command installs the small CPU build of PyTorch, which is all TeddyClip needs.
+   The second command installs the small CPU build of PyTorch, which is all TeddyClip needs.
 6. **NVIDIA graphics card (for example an RTX 3060): add the GPU libraries.** Run this as an extra step:
    ```
    .venv\Scripts\pip install -e .[gpu]
@@ -101,6 +101,8 @@ Everything works with no changes except the names. Open `config.yaml` in Notepad
 | `triggers` | The phrases that always make a clip. Add any variants the transcript mishears. |
 | `audio_track` | Which OBS audio track holds your microphones (for example `2`). Leave as `null` to use track 1. See the [OBS setup guide](docs/obs-setup.md). |
 | `whisper_model` | `auto` picks a large model on a GPU (with the GPU libraries installed) and a small one on the CPU. |
+| `whisper_device` | `auto` uses the NVIDIA GPU for transcribing when it works, otherwise the CPU. `cpu` never touches the GPU. |
+| `language` | The language you speak, default `en`. Set it to `null` to let whisper guess, which often goes wrong when a recording starts with game music. |
 | `llm: model` | The Ollama model for jokes and titles, or `none` to turn the AI off. |
 | `clips:` | `min_seconds` and `max_seconds` (clip length, default 20 to 120), `max_clips` (default 40), `pre_trigger_seconds` (how far back a "clip that" clip starts, default 45). |
 | `weights` | How much each signal counts: laughter, joke_sweep, loudness, voice_jump, screen_text. |
@@ -112,6 +114,7 @@ Everything works with no changes except the names. Open `config.yaml` in Notepad
 - **`teddyclip check` says ffmpeg is not found.** Close the window and open a new one after `winget install Gyan.FFmpeg`. If it still fails, restart the PC.
 - **A recording failed.** It stays in `1 Inbox`. The message on screen says why. Fix it and run `TeddyClip.bat` again.
 - **"has no sound track."** OBS recorded that file without audio. See the audio track part of the [OBS setup guide](docs/obs-setup.md) and record again.
+- **A run crashes during transcription on a GPU PC.** Set `whisper_device: cpu` in `config.yaml` and run it again. Transcribing is slower on the CPU, but everything else is the same.
 - **Nothing happens for a recording.** TeddyClip waits until a file has not changed for 60 seconds, so a recording that just finished may need a minute. Run it again.
 
 Once you have run a real session, work through the [real-footage checklist](docs/real-footage-checklist.md) to tune it.

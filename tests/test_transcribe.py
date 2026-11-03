@@ -32,7 +32,7 @@ class FakeModel:
 
     def transcribe(self, path, language=None, vad_filter=False, beam_size=5,
                    condition_on_previous_text=True, word_timestamps=False, hotwords=None):
-        self.kwargs = dict(vad_filter=vad_filter, beam_size=beam_size,
+        self.kwargs = dict(language=language, vad_filter=vad_filter, beam_size=beam_size,
                            condition_on_previous_text=condition_on_previous_text,
                            word_timestamps=word_timestamps, hotwords=hotwords)
         if self.error:
@@ -78,11 +78,43 @@ def test_transcribe_passes_options_and_writes_cache(tmp_path, monkeypatch):
     model = FakeModel()
     monkeypatch.setattr(transcribe_mod, "_load_model", lambda *a, **k: model)
     segs = transcribe(tmp_path / "a.wav", tmp_path, hotwords=["Teddy", "clip"])
-    assert model.kwargs == dict(vad_filter=True, beam_size=1, condition_on_previous_text=False,
+    assert model.kwargs == dict(language="en", vad_filter=True, beam_size=1, condition_on_previous_text=False,
                                 word_timestamps=True, hotwords="Teddy clip")
     assert [w.text for w in segs[0].words] == ["clip", "that"]
     cached = json.loads((tmp_path / "transcript.json").read_text(encoding="utf-8"))
     assert cached[0]["words"][0] == {"start": 0.0, "end": 0.4, "text": "clip"}
+
+
+def test_language_is_passed_and_none_means_auto_detect(tmp_path, monkeypatch):
+    model = FakeModel()
+    monkeypatch.setattr(transcribe_mod, "_load_model", lambda *a, **k: model)
+    transcribe(tmp_path / "a.wav", tmp_path / "de", language="de")
+    assert model.kwargs["language"] == "de"
+    transcribe(tmp_path / "a.wav", tmp_path / "auto", language=None)
+    assert model.kwargs["language"] is None
+
+
+def test_device_cpu_never_touches_the_gpu(tmp_path, monkeypatch):
+    monkeypatch.setattr(transcribe_mod, "gpu_ready", lambda: pytest.fail("GPU checked"))
+    made = []
+
+    class FakeWhisperModel(FakeModel):
+        def __init__(self, name, device, compute_type):
+            super().__init__(device=device)
+            made.append((name, device, compute_type))
+
+    import faster_whisper
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", FakeWhisperModel)
+    transcribe(tmp_path / "a.wav", tmp_path, device="cpu")
+    assert made == [("small", "cpu", "int8")]
+
+
+def test_device_auto_is_the_default(tmp_path, monkeypatch):
+    devices = []
+    monkeypatch.setattr(transcribe_mod, "_load_model", lambda size, device="auto": devices.append(device) or FakeModel())
+    transcribe(tmp_path / "a.wav", tmp_path)
+    assert devices == ["auto"]
 
 
 def test_hotwords_omitted_when_not_given(tmp_path, monkeypatch):
@@ -203,7 +235,7 @@ def test_add_nvidia_dll_dirs_puts_folders_on_path(tmp_path, monkeypatch):
     monkeypatch.setattr(transcribe_mod.os, "name", "nt")
     added = []
     monkeypatch.setattr(transcribe_mod.os, "add_dll_directory", added.append, raising=False)
-    monkeypatch.setenv("PATH", "C:\base")
+    monkeypatch.setenv("PATH", r"C:\base")
     cudnn = tmp_path / "nvidia" / "cudnn" / "bin"
     cudnn.mkdir(parents=True)
     assert transcribe_mod._add_nvidia_dll_dirs([cudnn]) == [cudnn]

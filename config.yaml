@@ -3,6 +3,8 @@ people: [Teddy, Friend]            # used in titles
 triggers: ["clip that", "clip it", "clip this"]
 audio_track: null                  # e.g. 2 if mics are on their own OBS track
 whisper_model: auto                # large-v3-turbo on GPU, small on CPU
+whisper_device: auto               # auto (GPU when it works) or cpu (never use the GPU)
+language: en                       # what you speak; null lets whisper guess (it often guesses wrong on game noise)
 llm:
   model: qwen3:4b                  # or "none"; final choice after testing
   url: http://127.0.0.1:11434
