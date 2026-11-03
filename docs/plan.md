@@ -562,7 +562,7 @@ def test_check_reports_missing_ffmpeg(cfg, monkeypatch, capsys):
 - [ ] **Step 1: README** gains Quick start (spec section 11 steps, with the exact `pip` commands from Task 1), the folder flow diagram from spec section 3, a config summary, and keeps Roadmap, Built on and License. Status line changes to "v1: works end to end; tuning on real footage."
 - [ ] **Step 2: `docs/obs-setup.md`**: Settings > Output > Recording Format "Hybrid MP4"; Settings > Hotkeys "Add Chapter Marker" (optional clip button); Audio tracks: track 1 full mix, mics alone on track 2, then `audio_track: 2` in config; Recording Path pointed at `TeddyClip\1 Inbox\<Game>`.
 - [ ] **Step 3: `docs/real-footage-checklist.md`**: run `teddyclip check`; process one real session; confirm every "clip that" produced a clip; rate the top 10 clips; for a Souls session confirm YOU DIED events in `moments.csv`; import `Resolve markers.edl` via Media Pool right-click > Timelines > Import > Timeline Markers from EDL and confirm positions; try 2 models (`qwen3:4b`, `gemma3:4b`) and record which titles better; note misheard trigger variants to add to `triggers`.
-- [ ] **Step 4: Run** `grep -rnP "\x{2014}|\x{2013}" README.md docs teddyclip prompts config.yaml` (em and en dash code points). Expected: no output.
+- [ ] **Step 4: Run** `.venv\Scripts\python -c "import pathlib; [print(p) for p in pathlib.Path('.').rglob('*') if p.suffix in {'.md','.py','.txt','.yaml'} and '.venv' not in p.parts and any(c in p.read_text(encoding='utf-8') for c in '—–')]"` (em and en dash code points). Expected: no output.
 - [ ] **Step 5: Commit** `"Document install, OBS setup and real-footage checklist"`.
 
 ---
