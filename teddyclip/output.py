@@ -269,15 +269,19 @@ def build_highlight(clip_dir: Path, video_out: Path, chapters_out: Path) -> Path
 
 
 def archive_original(src: Path, done_dir: Path, moments: list[Moment], name: str) -> Path:
-    """Remux `src` into `done_dir/<name>.mp4` with the kept moments as chapters,
-    check the copy is as long as the original, then delete `src`.
+    """Remux `src` into `done_dir/<name><src extension>` with the kept moments as
+    chapters, check the copy is as long as the original, then delete `src`.
     On any failure the partial output is removed and `src` is left alone."""
     src, done_dir = Path(src), Path(done_dir)
-    dst = done_dir / f"{name}.mp4"
+    dst = done_dir / f"{name}{src.suffix or '.mp4'}"
     if dst.exists():
         raise FileExistsError(f"{dst} already exists, so the original was not moved. Rename or remove it and try again.")
     done_dir.mkdir(parents=True, exist_ok=True)
-    chapters = [media.Chapter(m.start, m.end, " ".join(m.title.split()) or "moment") for m in _kept(moments)]
+    kept = _kept(moments)
+    chapters = [media.Chapter(m.start, m.end, " ".join(m.title.split()) or "moment") for m in kept]
+    if kept and kept[0].start > 1.0:
+        # The mov muxer makes chapters gapless, so without this the first moment's chapter would start at 0.
+        chapters.insert(0, media.Chapter(0, kept[0].start, "Start"))
     try:
         media.write_chapters(src, dst, chapters)
         want, got = media.probe(src).duration, media.probe(dst).duration

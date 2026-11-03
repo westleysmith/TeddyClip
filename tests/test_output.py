@@ -1,4 +1,5 @@
 import csv
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -318,7 +319,7 @@ def test_archive_keeps_source_on_failure(tiny_video, tmp_path, monkeypatch):
 
 def test_archive_moves_source_into_done_with_chapters(tiny_video, tmp_path):
     ms = [
-        Moment(1, 4, 9, "trigger", title="Boss", keep=True),
+        Moment(2, 5, 9, "trigger", title="Boss", keep=True),
         Moment(5, 8, 5, "loud", title="Skipped"),
         Moment(6, 9, 8, "marker", title="Hotkey", keep=True),
     ]
@@ -328,9 +329,27 @@ def test_archive_moves_source_into_done_with_chapters(tiny_video, tmp_path):
     assert not tiny_video.exists()
     info = media.probe(dst)
     assert abs(info.duration - 10) < 0.5
+    assert [c.title for c in info.chapters] == ["Start", "Boss", "Hotkey"]
+    assert [round(c.start, 2) for c in info.chapters] == [0, 2, 6]
+
+
+def test_archive_adds_no_start_chapter_when_first_moment_starts_at_zero(tiny_video, tmp_path):
+    ms = [Moment(0, 3, 9, "trigger", title="Boss", keep=True), Moment(6, 9, 8, "marker", title="Hotkey", keep=True)]
+    dst = archive_original(tiny_video, tmp_path / "Done", ms, "session")
+    info = media.probe(dst)
     assert [c.title for c in info.chapters] == ["Boss", "Hotkey"]
-    # The mp4 muxer stores chapters as one gapless track, so the first always starts at 0.
-    assert info.chapters[1].start == pytest.approx(6, abs=0.01)
+    assert [round(c.start, 2) for c in info.chapters] == [0, 6]
+
+
+def test_archive_keeps_the_source_container_extension(tiny_video, tmp_path):
+    mkv = tmp_path / "rec.mkv"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tiny_video), "-c", "copy", str(mkv)], check=True)
+    ms = [Moment(2, 5, 9, "trigger", title="Boss", keep=True)]
+    done = tmp_path / "Done"
+    dst = archive_original(mkv, done, ms, "session")
+    assert dst == done / "session.mkv" and dst.suffix == ".mkv" and dst.is_file()
+    assert not mkv.exists()
+    assert [c.title for c in media.probe(dst).chapters] == ["Start", "Boss"]
 
 
 def test_archive_refuses_to_overwrite(tiny_video, tmp_path):
