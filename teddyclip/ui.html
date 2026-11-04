@@ -20,6 +20,24 @@
   .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
   .brand h1 { margin: 0; font-size: 28px; line-height: 1; font-weight: 700; letter-spacing: 1px; color: var(--walnut); text-transform: lowercase; }
   main { max-width: 1280px; margin: 0 auto; padding: 22px 24px 20px; }
+  .auto-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px;
+              border-top: 1px dashed var(--line); }
+  .auto-row .spacer { flex: 1; }
+  .auto-text { font-size: 14px; }
+  .auto-text .muted { font-size: 13px; }
+  #auto-game-box { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  #auto-game-box[hidden] { display: none; }
+  #auto-game { font: inherit; padding: 6px 14px; border-radius: 999px; border: 1.5px solid var(--line);
+               background: var(--cream); color: var(--ink); width: 190px; }
+  #auto-game:focus { outline: none; border-color: var(--orange); }
+  .switch { position: relative; width: 50px; height: 28px; flex: none; cursor: pointer; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch .knob { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .15s; }
+  .switch .knob::after { content: ""; position: absolute; left: 4px; top: 4px; width: 20px; height: 20px; border-radius: 50%;
+                         background: var(--cream); box-shadow: 1px 1px 0 rgba(91, 61, 41, .25); transition: transform .15s; }
+  .switch input:checked + .knob { background: var(--orange); }
+  .switch input:checked + .knob::after { transform: translateX(22px); }
+  .switch input:focus-visible + .knob { outline: 2px solid var(--teal); outline-offset: 2px; }
   #shelf { text-align: center; margin-top: 4px; }
   #shelf .panel { text-align: left; margin-top: 12px; }
   button.linkish { border: none; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; padding: 4px; }
@@ -124,7 +142,22 @@
   <div class="stripes"></div>
 </header>
 <main>
-  <section class="panel" id="inbox"></section>
+  <section class="panel" id="inbox">
+    <div id="inbox-list"></div>
+    <div class="auto-row">
+      <label class="switch" title="Make clips by itself whenever OBS finishes a recording">
+        <input type="checkbox" id="auto"><span class="knob"></span>
+      </label>
+      <div class="auto-text"><b>Make clips automatically</b>
+        <div class="muted" id="auto-status">Off. Turn on to clip new recordings as soon as they land in 1 - Raw recordings.</div></div>
+      <span class="spacer"></span>
+      <div id="auto-game-box" hidden>
+        <span class="muted">Game for new recordings</span>
+        <input id="auto-game" list="games-list" placeholder="e.g. Elden Ring" maxlength="60" autocomplete="off">
+      </div>
+      <datalist id="games-list"></datalist>
+    </div>
+  </section>
   <section class="panel job" id="job" hidden>
     <h2><span class="spinner" id="spin"></span><span id="job-name"></span></h2>
     <div class="prow"><span id="pstep"></span><span class="spacer"></span><span class="muted" id="ptime"></span><b id="ppct"></b></div>
@@ -179,6 +212,17 @@ async function post(url, body) {
   return r.ok;
 }
 
+function renderAuto(st) {
+  const s = st.settings || {auto: false, auto_game: ""};
+  const box = $("auto"), game = $("auto-game");
+  if (document.activeElement !== box) box.checked = s.auto;
+  $("auto-game-box").hidden = !s.auto;
+  if (document.activeElement !== game) game.value = s.auto_game || "";
+  $("auto-status").textContent = s.auto ? st.auto_status
+    : "Off. Turn on to clip new recordings as soon as they land in 1 - Raw recordings.";
+  $("games-list").innerHTML = games.map((g) => `<option value="${esc(g)}"></option>`).join("");
+}
+
 function renderInbox(inbox) {
   const ready = inbox.filter((f) => f.ready).length;
   let html;
@@ -188,7 +232,7 @@ function renderInbox(inbox) {
     html = `<b>${inbox.length} raw recording${inbox.length === 1 ? "" : "s"} waiting</b>` +
       `<ul class="inbox-list">${inbox.map((f) => `<li>${esc(f.name)}${f.ready ? "" : ' <span class="muted">(still being recorded or copied)</span>'}</li>`).join("")}</ul>`;
   }
-  $("inbox").innerHTML = html;
+  $("inbox-list").innerHTML = html;
   $("make").disabled = busy || ready === 0;
   $("make").title = ready ? "" : "Add a recording first";
 }
@@ -286,6 +330,7 @@ async function refresh() {
     if (wasRunning && !busy) lastSessions = "";  // a job just finished: show its results
     wasRunning = busy;
     games = st.games || [];
+    renderAuto(st);
     renderInbox(st.inbox);
     renderJob(st.job);
     renderSessions(st.sessions);
@@ -335,6 +380,11 @@ function askGame(files) {
     input.focus();
   });
 }
+
+$("auto").onchange = async () => { await post("/api/settings", {auto: $("auto").checked}); refresh(); };
+const saveGame = () => post("/api/settings", {auto_game: $("auto-game").value.trim()});
+$("auto-game").onchange = saveGame;
+$("auto-game").onkeydown = (e) => { if (e.key === "Enter") { e.target.blur(); } };
 
 $("add").onclick = async () => {
   const api = window.pywebview && window.pywebview.api;

@@ -79,6 +79,8 @@ The first real run downloads the whisper speech model and the laughter and shout
 5. Watch the clips on the page and click **Delete** on the ones you don't want (they go to the Recycle Bin, so nothing is lost by accident).
 6. Click **Make highlight**. The clips you kept are joined in time order into `3 Highlights`, with a YouTube chapters file next to it, and the highlight appears on the page.
 
+**Hands-free:** point OBS's recording folder at `1 - Raw recordings` and turn on **Make clips automatically** in the window, with the game you are playing. Recordings are then clipped as soon as OBS finishes them, while the TeddyClip window is open. See the [OBS setup guide](docs/obs-setup.md).
+
 Prefer no browser? `TeddyClip.bat` does step 4 in a console window, and dragging a clip folder onto `Highlight.bat` does step 6.
 
 ### What gets made

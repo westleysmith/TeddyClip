@@ -114,7 +114,7 @@ def main() -> int:
 
     server = None
     try:
-        server = ui.make_server(cfg, ui.PORT)
+        server = ui.make_server(cfg, ui.PORT, watch=True)
     except OSError:
         pass  # TeddyClip is already open: this window shows the same page
     if server is not None:

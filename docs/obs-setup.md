@@ -1,17 +1,21 @@
 # OBS setup for TeddyClip
 
-Four settings in OBS make TeddyClip work better. All of them are optional. The first one (the recording path) helps most, because recordings then land in the inbox on their own; without it you move them there yourself. Menu names are from a recent OBS Studio (30.2 or newer) and may differ slightly in other versions.
+Four settings in OBS make TeddyClip work better. All of them are optional. The first one (the recording path) helps most, because recordings then land in TeddyClip's Raw recordings folder on their own; without it you add them with **Add recordings**. Menu names are from a recent OBS Studio (30.2 or newer) and may differ slightly in other versions.
 
 ## 1. Recording path (recommended)
 
-Point OBS at the TeddyClip inbox so recordings land there on their own.
+Point OBS at TeddyClip's Raw recordings folder so recordings land there on their own.
 
 1. Open OBS, then Settings > Output.
-2. Under Recording, set **Recording Path** to your inbox, plus a folder named after the game. For example:
-   `C:\Users\<you>\TeddyClip\1 Inbox\Elden Ring`
-3. Change the last folder name when you switch games. The folder name is used in the clip folder name, and some games get screen-text detection from it (Elden Ring and Dark Souls look for YOU DIED, GTA and Red Dead for WASTED, Counter-Strike for ROUND WON, and so on). A recording dropped straight into `1 Inbox` still works; it just has no game.
+2. Under Recording, set **Recording Path** to:
+   `C:\Users\<you>\TeddyClip\1 - Raw recordings`
+3. In TeddyClip, turn on **Make clips automatically** and type the game you are playing in **Game for new recordings**. Each recording is then clipped as soon as OBS finishes it, filed under that game. The game name switches on screen-text detection (Elden Ring and Dark Souls look for YOU DIED, GTA and Red Dead for WASTED, Counter-Strike for ROUND WON, and so on); change it when you switch games.
 
-If you are not sure where your inbox is, run `teddyclip check`: it prints the TeddyClip folder.
+Automatic mode waits while any recording in that folder is still being written, so it does not slow your game down while you are still recording. It works while the TeddyClip window is open.
+
+If you would rather sort by hand, set the Recording Path to a folder named after the game inside Raw recordings (for example `1 - Raw recordings\Elden Ring`) and leave automatic mode off.
+
+If you are not sure where the TeddyClip folder is, click **TeddyClip Folders** on the desktop.
 
 TeddyClip only picks up `.mp4` and `.mkv` files, and it waits until OBS has stopped writing a file for 60 seconds before touching it.
 

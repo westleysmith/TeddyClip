@@ -284,8 +284,10 @@ def state(cfg: Config, job: Job) -> dict:
     if shelf.is_dir():
         for folder in sorted((d for d in shelf.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, reverse=True):
             archived.append({"name": folder.name, "clips": sum(1 for _ in folder.glob("*.mp4"))})
+    settings = load_settings(cfg)
     return {"inbox": inbox, "sessions": sessions, "archived": archived,
-            "games": _games(cfg, sessions + archived), "job": job.state()}
+            "games": _games(cfg, sessions + archived), "job": job.state(),
+            "settings": settings, "auto_status": auto_status(cfg, job, settings)}
 
 
 def _free_dir(path: Path) -> Path:
@@ -434,6 +436,18 @@ def make_handler(cfg: Config, job: Job):
                                  lambda: cli.highlight(cfg.paths.clips / session, cfg)):
                     return self._error(HTTPStatus.CONFLICT, "TeddyClip is already busy")
                 return self._json({"ok": True})
+            if path == "/api/settings":
+                settings = load_settings(cfg)
+                if "auto" in data:
+                    if not isinstance(data["auto"], bool):
+                        return self._error(HTTPStatus.BAD_REQUEST, "auto must be true or false")
+                    settings["auto"] = data["auto"]
+                if "auto_game" in data:
+                    settings["auto_game"] = game_name(data["auto_game"]) or ""
+                save_settings(cfg, settings)
+                if settings["auto"]:
+                    auto_tick(cfg, job)  # do not wait 30 s for the first look
+                return self._json(settings)
             if path in ("/api/archive", "/api/unarchive"):
                 session = _plain_name(data.get("session"))
                 if session is None or session == ARCHIVE:
@@ -477,17 +491,104 @@ def make_handler(cfg: Config, job: Job):
     return Handler
 
 
-def make_server(cfg: Config, port: int = PORT) -> ThreadingHTTPServer:
+def make_server(cfg: Config, port: int = PORT, watch: bool = False) -> ThreadingHTTPServer:
+    """The TeddyClip page's server. watch=True also starts automatic mode's
+    watcher, which runs while the server does."""
     cfg.paths.ensure()
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(cfg, Job()))
+    job = Job()
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(cfg, job))
     server.daemon_threads = True
+    if watch:
+        threading.Thread(target=_watch, args=(cfg, job), daemon=True).start()
     return server
+
+
+# Automatic mode: make clips as soon as a recording lands in Raw recordings.
+
+AUTO_CHECK_SECONDS = 30
+DEFAULT_SETTINGS = {"auto": False, "auto_game": ""}
+
+
+def _settings_file(cfg: Config) -> Path:
+    return cfg.paths.cache / "settings.json"
+
+
+def load_settings(cfg: Config) -> dict:
+    settings = dict(DEFAULT_SETTINGS)
+    with contextlib.suppress(OSError, ValueError, TypeError):
+        saved = json.loads(_settings_file(cfg).read_text(encoding="utf-8"))
+        if isinstance(saved, dict):
+            settings["auto"] = saved.get("auto") is True
+            settings["auto_game"] = game_name(saved.get("auto_game")) or ""
+    return settings
+
+
+def save_settings(cfg: Config, settings: dict) -> None:
+    path = _settings_file(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(settings), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _raw_recordings(cfg: Config) -> list[Path]:
+    inbox = cfg.paths.inbox
+    if not inbox.is_dir():
+        return []
+    return [p for p in inbox.rglob("*") if p.is_file() and p.suffix.lower() in cli.VIDEO_SUFFIXES]
+
+
+def auto_status(cfg: Config, job: Job, settings: dict) -> str:
+    """What automatic mode is doing, in plain words, for the page."""
+    if not settings["auto"]:
+        return ""
+    if job.running:
+        return "Working on a recording now."
+    files = _raw_recordings(cfg)
+    if any(not cli.is_finished(p) for p in files):
+        return "Waiting for OBS to finish the recording, so your game is not slowed down."
+    return "Watching 1 - Raw recordings. New recordings are clipped as soon as they land."
+
+
+def auto_tick(cfg: Config, job: Job) -> str:
+    """One look at Raw recordings for automatic mode: when it is on, nothing
+    is running, and every recording there is finished (OBS has stopped
+    writing), file loose recordings under the chosen game and make clips.
+    Waiting while anything is still being written keeps a new recording
+    session from being slowed down. Returns what it did."""
+    settings = load_settings(cfg)
+    if not settings["auto"]:
+        return "off"
+    if job.running:
+        return "busy"
+    files = _raw_recordings(cfg)
+    if not files:
+        return "nothing"
+    if any(not cli.is_finished(p) for p in files):
+        return "recording"
+    game = settings["auto_game"]
+    if game:
+        loose = [p for p in files if p.parent == cfg.paths.inbox]
+        if loose:
+            (cfg.paths.inbox / game).mkdir(parents=True, exist_ok=True)
+        for p in loose:  # same folder tree, so this is an instant rename
+            os.replace(p, _free_name(cfg.paths.inbox / game / p.name))
+    return "started" if job.start("Making clips (automatic)", lambda: cli.process_inbox(cfg)) else "busy"
+
+
+def _watch(cfg: Config, job: Job) -> None:
+    while True:
+        time.sleep(AUTO_CHECK_SECONDS)
+        try:
+            auto_tick(cfg, job)
+        except Exception:  # a locked or vanished file: look again next time
+            pass
 
 
 def serve(cfg: Config, port: int = PORT, open_browser: bool = True) -> int:
     url = f"http://127.0.0.1:{port}/"
     try:
-        server = make_server(cfg, port)
+        server = make_server(cfg, port, watch=True)
     except OSError:
         # Most likely TeddyClip is already open in another window: just show it.
         print(f"TeddyClip seems to be open already. Opening {url}")

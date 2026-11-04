@@ -42,7 +42,7 @@ def test_window_shows_the_page_and_closing_it_stops_the_server(cfg, tmp_path, mo
     started = []
     real = ui.make_server
     # A free port for the test server; the window URL still names the usual port.
-    monkeypatch.setattr(ui, "make_server", lambda c, port: started.append(real(c, 0)) or started[-1])
+    monkeypatch.setattr(ui, "make_server", lambda c, port, watch=False: started.append(real(c, 0)) or started[-1])
 
     def start():  # while the window is "open", the page can reach the server
         port = started[0].server_address[1]
@@ -66,7 +66,7 @@ def test_second_window_reuses_the_running_teddyclip(cfg, monkeypatch):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     monkeypatch.setattr(ui, "PORT", srv.server_address[1])
 
-    def busy(c, port):
+    def busy(c, port, watch=False):
         raise OSError("address in use")
     monkeypatch.setattr(ui, "make_server", busy)
     try:
