@@ -18,7 +18,7 @@ from teddyclip import progress
 from teddyclip.config import Config, load_config
 from teddyclip.detectors import Lexicon, game_profile, screen_events
 from teddyclip.llm import LLM
-from teddyclip.media import CPU_ARGS, encoder_args, extract_audio, find_tool, probe
+from teddyclip.media import CPU_ARGS, encoder_args, encoder_name, extract_audio, find_tool, probe
 from teddyclip.moments import (
     forced_windows,
     label,
@@ -396,13 +396,13 @@ def check(cfg: Config) -> int:
     if has_ffmpeg:
         _line("ok", "ffmpeg and ffprobe found")
         if encoder_args() != CPU_ARGS:
-            _line("ok", "NVENC works: clips are encoded on the NVIDIA GPU")
+            _line("ok", f"Clips are encoded on the graphics card ({encoder_name()})")
         else:
-            _line("info", "NVENC is not available: clips are encoded on the CPU, which is slower")
+            _line("info", "No graphics-card video encoder works here: clips are encoded on the CPU, which is slower")
     else:
         failures += 1
         _line("fail", "ffmpeg not found: run 'winget install Gyan.FFmpeg', then open a new window (README step 2)")
-        _line("info", "NVENC not checked, because it needs ffmpeg")
+        _line("info", "Video encoder not checked, because it needs ffmpeg")
 
     if cfg.whisper_device == "cpu":
         _line("info", "whisper_device: cpu in config.yaml, so whisper transcribes on the CPU and the GPU is not checked")

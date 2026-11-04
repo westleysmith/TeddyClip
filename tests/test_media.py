@@ -172,3 +172,12 @@ def test_find_tool_falls_back_to_winget_folder(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert media.find_tool("ffprobe") == str(bin_dir / "ffprobe.exe")
     assert media.find_tool("ffmpeg") is None
+
+
+def test_encoder_tries_nvidia_then_amd_then_intel(monkeypatch):
+    tried = []
+    monkeypatch.setattr(media, "_encoder_cache", None)
+    monkeypatch.setattr(media, "_probe_encoder", lambda args: tried.append(args[1]) or args[1] == "h264_qsv")
+    assert media.encoder_args() == media.QSV_ARGS
+    assert tried == ["h264_nvenc", "h264_amf", "h264_qsv"]
+    assert media.encoder_name() == "Intel Quick Sync"

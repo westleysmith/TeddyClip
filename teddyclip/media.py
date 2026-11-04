@@ -24,6 +24,10 @@ log = logging.getLogger(__name__)
 
 CPU_ARGS = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
 NVENC_ARGS = ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
+AMF_ARGS = ["-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23"]
+QSV_ARGS = ["-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "23"]
+# Graphics-card video encoders, tried in this order; the first that works is used.
+HARDWARE_ENCODERS = [("NVIDIA NVENC", NVENC_ARGS), ("AMD AMF", AMF_ARGS), ("Intel Quick Sync", QSV_ARGS)]
 
 # Every platform normalises uploads to about -14 LUFS, so normalise once here.
 LOUDNORM = "loudnorm=I=-14:TP=-1.5:LRA=11"
@@ -179,7 +183,7 @@ def _probe_encoder(args: list[str]) -> bool:
             [
                 _tool("ffmpeg"), "-v", "error",
                 "-f", "lavfi", "-i", "color=black:s=256x256:r=30:d=1",
-                *args, "-f", "null", "-",
+                *args, "-pix_fmt", "yuv420p", "-f", "null", "-",
             ],
             capture_output=True,
             timeout=30,
@@ -190,15 +194,23 @@ def _probe_encoder(args: list[str]) -> bool:
         return False
 
 
+def encoder_name() -> str:
+    """Which encoder clips are cut with, in plain words."""
+    args = encoder_args()
+    return next((name for name, a in HARDWARE_ENCODERS if a == args), "the CPU")
+
+
 def encoder_args() -> list[str]:
-    """NVENC when a test encode works, otherwise libx264. Decided once per process."""
+    """The first graphics-card encoder (NVIDIA, AMD, Intel) whose test encode
+    works, otherwise libx264 on the CPU. Decided once per process."""
     global _encoder_cache
     if _encoder_cache is None:
-        if _probe_encoder(NVENC_ARGS):
-            log.info("Using NVIDIA NVENC for video encoding")
-            _encoder_cache = list(NVENC_ARGS)
-        else:
-            _encoder_cache = list(CPU_ARGS)
+        _encoder_cache = list(CPU_ARGS)
+        for name, args in HARDWARE_ENCODERS:
+            if _probe_encoder(args):
+                log.info("Using %s for video encoding", name)
+                _encoder_cache = list(args)
+                break
     return list(_encoder_cache)
 
 
