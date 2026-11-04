@@ -15,8 +15,10 @@ from teddyclip.media import (
     cut,
     extract_audio,
     probe,
+    make_preview,
     read_frames,
-    write_chapters,
+    remux_to_mp4,
+    window_playable,
 )
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
@@ -166,13 +168,42 @@ def test_encoder_args_falls_back_to_cpu_without_gpu(monkeypatch):
     assert media.encoder_args() == CPU_ARGS
 
 
-def test_chapters_roundtrip(tiny_video, tmp_path):
-    dst = write_chapters(tiny_video, tmp_path / "o.mp4", [Chapter(0, 4, "A = b; c"), Chapter(4, 10, "Two")])
-    assert [c.title for c in probe(dst).chapters] == ["A = b; c", "Two"]
+def test_probe_reads_obs_chapter_markers(tiny_video, tmp_path):
+    meta = tmp_path / "chapters.ffmeta"
+    meta.write_text("\n".join([";FFMETADATA1", "[CHAPTER]", "TIMEBASE=1/1000", "START=0", "END=4000", "title=One",
+                               "[CHAPTER]", "TIMEBASE=1/1000", "START=4000", "END=10000", "title=Two", ""]),
+                    encoding="utf-8")
+    dst = tmp_path / "marked.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tiny_video), "-i", str(meta),
+                    "-map", "0", "-c", "copy", "-map_chapters", "1", str(dst)], check=True)
+    assert [c.title for c in probe(dst).chapters] == ["One", "Two"]
 
 
-def test_chapter_title_escaping_is_complete():
-    assert media._escape_meta("a=b;c#d\\e\nf") == "a\\=b\\;c\\#d\\\\e\\\nf"
+def _convert(src, dst, *args):
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(src), *args, str(dst)], check=True)
+    return dst
+
+
+def test_window_plays_h264_mp4_but_not_mkv_or_hevc(tiny_video, tmp_path):
+    mkv = _convert(tiny_video, tmp_path / "a.mkv", "-c", "copy")
+    hevc = _convert(tiny_video, tmp_path / "h.mp4", "-c:v", "libx265", "-c:a", "copy")
+    assert probe(tiny_video).video_codec == "h264" and probe(hevc).video_codec == "hevc"
+    assert window_playable(tiny_video)
+    assert not window_playable(mkv) and not window_playable(hevc)
+
+
+def test_remux_mkv_to_mp4_keeps_its_length(tiny_video, tmp_path):
+    mkv = _convert(tiny_video, tmp_path / "a.mkv", "-c", "copy")
+    out = remux_to_mp4(mkv, tmp_path / "out" / "a.mp4")
+    assert window_playable(out) and abs(probe(out).duration - probe(tiny_video).duration) < 0.2
+    assert sorted(p.name for p in out.parent.iterdir()) == ["a.mp4"]
+
+
+def test_preview_is_h264_at_most_720p(tiny_video, tmp_path):
+    big_hevc = _convert(tiny_video, tmp_path / "h.mp4", "-vf", "scale=1920:1080", "-c:v", "libx265", "-c:a", "copy")
+    out = make_preview(big_hevc, tmp_path / "preview.mp4")
+    info = probe(out)
+    assert window_playable(out) and info.height == 720 and abs(info.duration - 10.0) < 0.3
 
 
 def test_concat_two_cuts(tiny_video, tmp_path):

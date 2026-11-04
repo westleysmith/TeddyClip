@@ -1,6 +1,6 @@
 # Adapted from Clips Kitty (https://github.com/ColinGPT9/clips-studio), AGPL-3.0-or-later, Copyright (C) 2026 ColinGPT9. Modified for TeddyClip.
 """All ffmpeg and ffprobe calls live here: probing, audio and frame extraction,
-frame-accurate cutting, joining, and chapter markers.
+frame-accurate cutting, joining, and copies the app window can play.
 
 Encoder choice follows Clips Kitty's video/encoding.py (probe NVENC once with a
 real test encode, otherwise use libx264) and the CPU retry in video/cutter.py.
@@ -53,6 +53,7 @@ class Probe:
     height: int
     audio_tracks: int
     chapters: list[Chapter] = field(default_factory=list)
+    video_codec: str = ""
 
 
 def find_tool(name: str) -> str | None:
@@ -144,6 +145,7 @@ def probe(path: Path) -> Probe:
         height=int(video.get("height", 0)),
         audio_tracks=len(audio),
         chapters=chapters,
+        video_codec=str(video.get("codec_name", "")),
     )
 
 
@@ -298,36 +300,54 @@ def concat(files: list[Path], dst: Path) -> Path:
     return dst
 
 
-def _escape_meta(text: str) -> str:
-    """Escape a value for an ffmetadata file: = ; # \\ and newlines."""
-    out = text.replace("\\", "\\\\")
-    for ch in "=;#":
-        out = out.replace(ch, "\\" + ch)
-    return out.replace("\n", "\\\n")
+# Formats the TeddyClip window (Edge WebView2) plays without help.
+WINDOW_CONTAINERS = {".mp4", ".m4v", ".mov"}
+WINDOW_CODECS = {"h264"}
+PREVIEW_HEIGHT = 720
 
 
-def write_chapters(src: Path, dst: Path, chapters: list[Chapter]) -> Path:
-    """Remux `src` to `dst` with chapter markers, no re-encode."""
+def window_playable(path: Path) -> bool:
+    """True when the app window can play `path` as it is: H.264 in MP4 or MOV.
+    OBS can also record MKV, or H.265 and AV1 on some graphics cards."""
+    path = Path(path)
+    return path.suffix.lower() in WINDOW_CONTAINERS and probe(path).video_codec in WINDOW_CODECS
+
+
+def remux_to_mp4(src: Path, dst: Path) -> Path:
+    """Copy the video and every audio track of `src` into an MP4, without re-encoding."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    lines = [";FFMETADATA1"]
-    for c in chapters:
-        lines += [
-            "[CHAPTER]",
-            "TIMEBASE=1/1000",
-            f"START={round(c.start * 1000)}",
-            f"END={round(c.end * 1000)}",
-            f"title={_escape_meta(c.title)}",
-        ]
-    with tempfile.TemporaryDirectory() as tmp, _writing(dst.resolve()) as part:
-        meta = Path(tmp) / "chapters.ffmeta"
-        meta.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with _writing(dst.resolve()) as part:
         _run(
             [
-                _tool("ffmpeg"), "-y", "-v", "error", "-i", str(Path(src).resolve()), "-i", str(meta),
-                "-map", "0", "-c", "copy", "-map_chapters", "1",
-                "-f", "matroska" if dst.suffix.lower() == ".mkv" else "mp4", str(part),
+                _tool("ffmpeg"), "-y", "-v", "error", "-i", str(Path(src).resolve()),
+                "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-movflags", "+faststart",
+                "-f", "mp4", str(part),
             ],
-            f"write chapters into {Path(src).name}",
+            f"copy {Path(src).name} into an MP4",
         )
+    return dst
+
+
+def make_preview(src: Path, dst: Path) -> Path:
+    """A smaller H.264 copy of `src` (at most 720 lines) for the window to play
+    when it cannot play the original. Clips are still cut from the original."""
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    enc = encoder_args()
+    with _writing(dst.resolve()) as part:
+        cmd = [
+            _tool("ffmpeg"), "-y", "-v", "error", "-i", str(Path(src).resolve()),
+            "-map", "0:v:0", "-map", "0:a:0?",
+            "-vf", f"scale=-2:'min({PREVIEW_HEIGHT},ih)'",
+            *enc, "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+            "-f", "mp4", str(part),
+        ]
+        result = subprocess.run(cmd, capture_output=True, **NO_WINDOW)
+        if result.returncode != 0 and enc != CPU_ARGS:
+            log.warning("Hardware encoder refused %s, making the preview on the CPU", Path(src).name)
+            result = subprocess.run(_swap_encoder(cmd, enc, CPU_ARGS), capture_output=True, **NO_WINDOW)
+        if result.returncode != 0:
+            _fail(f"make a preview of {Path(src).name}", result)
     return dst
