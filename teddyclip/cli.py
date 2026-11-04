@@ -18,7 +18,7 @@ import yaml
 from teddyclip import progress, session
 from teddyclip.config import Config, load_config
 from teddyclip.detectors import Lexicon, game_profile, screen_events
-from teddyclip.llm import LLM
+from teddyclip.llm import LLM, start_ollama
 from teddyclip.media import (
     CPU_ARGS,
     encoder_args,
@@ -251,6 +251,8 @@ def process_recording(path: Path, cfg: Config, cut: bool = False) -> Path:
 
     llm = LLM(cfg.llm_url, cfg.llm_model, cache)
     if llm.enabled and not llm.available():
+        start_ollama(cfg.llm_url)  # installed but not running: start it, with no window
+    if llm.enabled and not llm.available():
         print(f"Ollama is not running or model {cfg.llm_model} is not pulled: continuing without AI titles")
         llm = LLM(cfg.llm_url, "none", cache)
     if llm.enabled:
@@ -482,7 +484,7 @@ def check(cfg: Config) -> int:
             requests.get(f"{url}/api/tags", timeout=5).raise_for_status()
             running = True
         except requests.RequestException:
-            running = False
+            running = start_ollama(url)  # installed but not running: start it, with no window
         if not running:
             failures += 1
             _line("fail", f"Ollama is not running at {url}: install it from ollama.com and start it")

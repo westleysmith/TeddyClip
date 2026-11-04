@@ -8,8 +8,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -32,6 +35,52 @@ def parse_json(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
+
+
+_START_WAIT = 20.0  # seconds to wait for a freshly started Ollama to answer
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def find_ollama() -> str | None:
+    """Ollama's program: on PATH, or where its installer puts it."""
+    found = shutil.which("ollama")
+    if found:
+        return found
+    exe = "ollama.exe" if os.name == "nt" else "ollama"
+    for folder in (Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama", Path.home() / "Ollama"):
+        if (folder / exe).is_file():
+            return str(folder / exe)
+    return None
+
+
+def _answering(url: str) -> bool:
+    try:
+        requests.get(f"{url.rstrip('/')}/api/tags", timeout=2).raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
+def start_ollama(url: str, wait: float = _START_WAIT) -> bool:
+    """Make sure the Ollama server at `url` answers, starting `ollama serve` in
+    the background, with no window, when it is installed here but not running.
+    TeddyClip does this itself, so Ollama's own app (which opens a window and
+    asks to sign in) never has to run. False when Ollama is not installed,
+    `url` is another computer, or it does not answer within `wait` seconds."""
+    if _answering(url):
+        return True
+    exe = find_ollama()
+    if exe is None or urlparse(url).hostname not in _LOCAL_HOSTS:
+        return False
+    flags = 0x08000000 | 0x00000200 if os.name == "nt" else 0  # CREATE_NO_WINDOW, CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen([exe, "serve"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if _answering(url):
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def _same_model(a: str, b: str) -> bool:

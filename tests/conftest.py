@@ -122,6 +122,7 @@ def fake_pipeline(monkeypatch):
         return real_screen_events(video, moments, lexicon, weight, ocr=lambda img: ([], 0.0), **kwargs)
 
     monkeypatch.setattr(cli, "transcribe", transcribe)
+    monkeypatch.setattr(cli, "start_ollama", lambda *a, **k: False)  # never start a real Ollama
     monkeypatch.setattr(cli, "release", lambda: None)
     monkeypatch.setattr(cli, "audio_features", audio_features)
     monkeypatch.setattr(cli, "people_sounds", people_sounds)

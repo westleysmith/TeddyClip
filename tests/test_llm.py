@@ -249,3 +249,60 @@ def test_an_answer_resets_the_failure_count(tmp_path, monkeypatch):
     for n in range(5):
         llm.ask(f"p{n}", {})
     assert llm.enabled
+
+
+# Starting Ollama ourselves, hidden, so its own app window never has to open
+
+class _Server:
+    """Pretends to be Ollama: answers once `up` is True."""
+    def __init__(self, up=False):
+        self.up = up
+        self.started = []
+
+    def get(self, url, timeout=None):
+        if not self.up:
+            raise requests.ConnectionError("refused")
+        return FakeResp({"models": []})
+
+    def popen(self, args, **kwargs):
+        self.started.append((args, kwargs))
+        self.up = True
+
+
+def test_start_ollama_does_nothing_when_it_already_answers(monkeypatch):
+    server = _Server(up=True)
+    monkeypatch.setattr(llm_mod.requests, "get", server.get)
+    monkeypatch.setattr(llm_mod.subprocess, "Popen", server.popen)
+    assert llm_mod.start_ollama("http://127.0.0.1:11434") is True and server.started == []
+
+
+def test_start_ollama_runs_serve_hidden_when_installed_but_stopped(monkeypatch):
+    server = _Server(up=False)
+    monkeypatch.setattr(llm_mod.requests, "get", server.get)
+    monkeypatch.setattr(llm_mod.subprocess, "Popen", server.popen)
+    monkeypatch.setattr(llm_mod, "find_ollama", lambda: r"C:\Ollama\ollama.exe")
+    assert llm_mod.start_ollama("http://127.0.0.1:11434") is True
+    (args, kwargs), = server.started
+    assert args == [r"C:\Ollama\ollama.exe", "serve"]
+    if llm_mod.os.name == "nt":
+        assert kwargs["creationflags"] & 0x08000000  # CREATE_NO_WINDOW
+
+
+def test_start_ollama_gives_up_when_it_is_not_installed_or_remote(monkeypatch):
+    server = _Server(up=False)
+    monkeypatch.setattr(llm_mod.requests, "get", server.get)
+    monkeypatch.setattr(llm_mod.subprocess, "Popen", server.popen)
+    monkeypatch.setattr(llm_mod, "find_ollama", lambda: None)
+    assert llm_mod.start_ollama("http://127.0.0.1:11434") is False
+    monkeypatch.setattr(llm_mod, "find_ollama", lambda: r"C:\Ollama\ollama.exe")
+    assert llm_mod.start_ollama("http://192.168.1.20:11434") is False  # another PC's Ollama is not ours to start
+    assert server.started == []
+
+
+def test_find_ollama_looks_where_its_installer_puts_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(llm_mod.shutil, "which", lambda name: None)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    exe = tmp_path / "Programs" / "Ollama" / ("ollama.exe" if llm_mod.os.name == "nt" else "ollama")
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    assert llm_mod.find_ollama() == str(exe)

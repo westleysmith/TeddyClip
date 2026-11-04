@@ -45,7 +45,7 @@ function Has-Command($name) { [bool](Get-Command $name -ErrorAction SilentlyCont
 function Install-Program($id, $label, [string[]]$extra = @()) {
     $listed = winget list --id $id --exact --accept-source-agreements 2>$null | Out-String
     if ($listed -match [regex]::Escape($id)) { Write-Host "$label is already installed."; return }
-    Write-Host "Installing $label (this can take a few minutes)..."
+    Write-Host "Installing $label..."
     winget install --id $id --exact --silent --accept-source-agreements --accept-package-agreements @extra
     if ($LASTEXITCODE -ne 0) { Fail "could not install $label (winget exit code $LASTEXITCODE)." }
     Refresh-Path
@@ -61,10 +61,23 @@ function Find-Python312 {
     return $null
 }
 
+# Ollama's installer opens Ollama's own window (which asks you to sign in) and
+# makes it start with Windows. TeddyClip starts Ollama itself, hidden, when it
+# needs it, so that window is closed and the startup entry removed.
+function Quiet-Ollama {
+    for ($i = 0; $i -lt 15; $i++) {
+        $app = Get-Process 'ollama app' -ErrorAction SilentlyContinue
+        if ($app) { Start-Sleep 1; $app | Stop-Process -Force -ErrorAction SilentlyContinue; break }
+        Start-Sleep 1
+    }
+    Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'Ollama.lnk') -ErrorAction SilentlyContinue
+}
+
 function Find-Ollama {
     if (Has-Command 'ollama') { return (Get-Command ollama).Source }
-    $guess = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
-    if (Test-Path $guess) { return $guess }
+    foreach ($guess in (Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'), (Join-Path $env:USERPROFILE 'Ollama\ollama.exe')) {
+        if (Test-Path $guess) { return $guess }
+    }
     return $null
 }
 
@@ -91,12 +104,12 @@ if (-not $Worker -and -not $Console) {
 
     # Everything the handlers change lives in $S, so they all see the same values.
     $S = @{ step = 0; stepStart = [DateTime]::Now; pos = 0; partial = ''; dec = [Text.Encoding]::UTF8.GetDecoder()
-            installDir = ''; root = ''; error = ''; proc = $null; log = (Join-Path $env:TEMP 'teddyclip-setup.log') }
+            installDir = ''; root = ''; error = ''; proc = $null; log = '' }
     # Rough seconds per step, so the bar keeps creeping forward inside a long step.
     $Expect = @{ 1 = 240; 2 = 20; 3 = 180; 4 = 2; 5 = 360; 6 = 20; 7 = 30 }
     $Caption = @{ 1 = 'Installing the helper programs TeddyClip uses'; 2 = 'Downloading TeddyClip'
                   3 = 'Putting TeddyClip together'; 4 = 'Saving your settings'
-                  5 = 'Downloading the AI that watches your videos (the big part)'; 6 = 'Adding TeddyClip to your desktop'
+                  5 = 'Downloading the AI that watches your videos'; 6 = 'Adding TeddyClip to your desktop'
                   7 = 'Making sure everything works' }
     # Already installed: the window offers an update instead (a demo always shows a first install).
     $existing = (Test-Path (Join-Path $env:LOCALAPPDATA 'TeddyClip-app\.venv')) -and -not $Demo
@@ -143,17 +156,15 @@ if (-not $Worker -and -not $Console) {
     $welcome = Page
     $title = if ($existing) { 'Update TeddyClip' } else { "Let's set up TeddyClip" }
     $body = if ($existing) { 'This gets the newest TeddyClip. Your clips, recordings and settings stay as they are.' }
-            else { 'TeddyClip finds the best moments in your gaming recordings. Setup downloads about 5 GB, mostly the AI that watches your videos, and usually takes 10 to 30 minutes.' }
+            else { 'TeddyClip finds the best moments in your gaming recordings. Setup installs everything it needs, including the AI that watches your videos.' }
     [void](Label $welcome $title 40 0 480 34 (Font 16 'Bold') $Walnut)
     [void](Label $welcome $body 40 40 480 64 (Font 10.5) $Walnut)
-    $youBox = $null; $friendBox = $null
+    $youBox = $null
     if (-not $existing) {
-        [void](Label $welcome 'Your name' 40 122 220 22 (Font 10 'Bold') $Walnut)
-        [void](Label $welcome "Your friend's name" 290 122 230 22 (Font 10 'Bold') $Walnut)
-        $youBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(40, 146)); Width = 220; Font = (Font 12); BackColor = $Cream; BorderStyle = 'FixedSingle'; MaxLength = 30 }
-        $friendBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(290, 146)); Width = 230; Font = (Font 12); BackColor = $Cream; BorderStyle = 'FixedSingle'; MaxLength = 30 }
-        $welcome.Controls.AddRange(@($youBox, $friendBox))
-        [void](Label $welcome 'Optional. TeddyClip can use them in clip titles.' 40 184 480 22 (Font 9.5) $Muted)
+        [void](Label $welcome 'Your name' 40 122 260 22 (Font 10 'Bold') $Walnut)
+        $youBox = New-Object Windows.Forms.TextBox -Property @{ Location = (New-Object Drawing.Point(40, 146)); Width = 260; Font = (Font 12); BackColor = $Cream; BorderStyle = 'FixedSingle'; MaxLength = 30 }
+        $welcome.Controls.Add($youBox)
+        [void](Label $welcome 'Optional. TeddyClip can use it in clip titles.' 40 184 480 22 (Font 9.5) $Muted)
     }
     $go = Button $welcome $(if ($existing) { 'Update' } else { 'Install' }) 360 300 160 $true
 
@@ -205,8 +216,9 @@ if (-not $Worker -and -not $Console) {
         Show-Page $work
         $S.step = 0; $S.stepStart = [DateTime]::Now; $S.pos = 0; $S.partial = ''; $S.error = ''
         $S.dec = [Text.Encoding]::UTF8.GetDecoder(); $logBox.Clear(); $bar.Tag = 0.0; $bar.Invalidate()
-        Remove-Item $S.log -ErrorAction SilentlyContinue
-        if ($youBox) { $env:TEDDYCLIP_SETUP_YOU = $youBox.Text; $env:TEDDYCLIP_SETUP_FRIEND = $friendBox.Text }
+        # A log of its own per run, so two setup windows never share one.
+        $S.log = Join-Path $env:TEMP ("teddyclip-setup-" + [DateTime]::Now.ToString('yyyyMMdd-HHmmss-fff') + '.log')
+        if ($youBox) { $env:TEDDYCLIP_SETUP_YOU = $youBox.Text }
         $pass = ''
         foreach ($name in 'SkipPrograms', 'SkipModels', 'SkipShortcuts', 'Demo') { if ((Get-Variable $name -ValueOnly)) { $pass += " -$name" } }
         if ($InstallDir) { $pass += " -InstallDir `"$InstallDir`"" }
@@ -233,7 +245,7 @@ if (-not $Worker -and -not $Console) {
         if ($lines.Count -lt 2) { return }  # no whole line yet
         foreach ($raw in $lines[0..($lines.Count - 2)]) {
             $text = ($raw.TrimEnd("`r") -split "`r")[-1]
-            $text = $text -replace "\x1b\[[0-9;?]*[ -/]*[@-~]", '' -replace '[─-▟]', ' ' -replace '\s+', ' '
+            $text = $text -replace "\x1b\[[0-9;?]*[ -/]*[@-~]", '' -replace '[\u2500-\u259F]', ' ' -replace '\s+', ' '
             $text = $text.Trim()
             if (-not $text) { continue }
             if ($text -match '^== Step (\d) of \d+: ') { $S.step = [int]$Matches[1]; $S.stepStart = [DateTime]::Now; $stepLabel.Text = $Caption[$S.step]; $detail.Text = '' }
@@ -291,7 +303,7 @@ if (-not $Worker -and -not $Console) {
 # would, quickly, and changes nothing.
 if ($Worker -and $Demo) {
     $labels = 'programs (Python, FFmpeg, Ollama)', 'TeddyClip files', "TeddyClip's Python packages", 'your settings',
-              'AI models (a few GB on the first run)', 'folders and desktop shortcuts'
+              'AI models', 'folders and desktop shortcuts'
     for ($i = 1; $i -le 6; $i++) {
         Say "Step $i of 6: $($labels[$i - 1])"
         foreach ($k in 1..3) { Write-Host "Demo: part $k of this step..."; Start-Sleep -Milliseconds 700 }
@@ -316,7 +328,7 @@ if (-not $SkipPrograms) {
     # program itself; reinstall with winget, or Ollama's own installer.
     if (Find-Ollama) { Write-Host "Ollama is already installed." }
     else {
-        Write-Host "Installing Ollama (this can take a few minutes)..."
+        Write-Host "Installing Ollama..."
         winget install --id Ollama.Ollama --exact --silent --force --accept-source-agreements --accept-package-agreements
         Refresh-Path
         if (-not (Find-Ollama)) {
@@ -328,7 +340,8 @@ if (-not $SkipPrograms) {
                 Refresh-Path
             } catch { Write-Host "Could not download Ollama ($($_.Exception.Message))." -ForegroundColor Yellow }
         }
-        if (-not (Find-Ollama)) { Write-Host "Ollama could not be installed, so AI titles will be off. TeddyClip still works." -ForegroundColor Yellow }
+        if (Find-Ollama) { Quiet-Ollama }
+        else { Write-Host "Ollama could not be installed, so AI titles will be off. TeddyClip still works." -ForegroundColor Yellow }
     }
 } else {
     Say "Step 1 of 6: skipped installing programs"
@@ -367,7 +380,7 @@ if ($fromRepo) {
 Set-Location $InstallDir
 
 # 3. Python packages
-Say "Step 3 of 6: TeddyClip's Python packages (a few hundred MB, takes a while)"
+Say "Step 3 of 6: TeddyClip's Python packages"
 $venvPy = Join-Path $InstallDir '.venv\Scripts\python.exe'
 if (-not (Test-Path $venvPy)) {
     & $Python -m venv .venv
@@ -418,7 +431,7 @@ if ($DataDir -and $text -match '(?m)^root:\s*C:\\Users\\\{user\}\\TeddyClip\s*$'
 
 # 5. AI models
 if (-not $SkipModels) {
-    Say "Step 5 of 6: AI models (a few GB on the first run)"
+    Say "Step 5 of 6: AI models"
     $model = 'qwen3:4b'
     if ($text -match '(?m)^\s+model:\s*([^\s#]+)') { $model = $Matches[1] }
     $ollama = Find-Ollama
@@ -466,7 +479,7 @@ download_model('$whisper')
             $models = (& $venvPy -c "from teddyclip.config import load_config; print(load_config().paths.models)").Trim()
             $ggml = Join-Path $models 'ggml-large-v3-turbo-q5_0.bin'
             if (-not (Test-Path $ggml)) {
-                Write-Host "Downloading its speech model (about 550 MB)..."
+                Write-Host "Downloading its speech model..."
                 Invoke-WebRequest 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin' -OutFile "$ggml.part" -UseBasicParsing -ErrorAction Stop
                 Move-Item "$ggml.part" $ggml -Force
             }

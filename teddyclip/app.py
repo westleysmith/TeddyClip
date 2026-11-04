@@ -13,6 +13,7 @@ from pathlib import Path
 
 from teddyclip import ui
 from teddyclip.config import Config, load_config
+from teddyclip.llm import start_ollama
 
 ICON = Path(__file__).with_name("teddyclip.ico")
 APP_ID = "TeddyClip.App"
@@ -111,6 +112,10 @@ def main() -> int:
     cfg = load_config(_config_path())
     _quiet_output(cfg)
     _set_taskbar_identity()
+
+    if cfg.llm_model != "none":
+        # TeddyClip runs Ollama itself, hidden, so Ollama's own window never opens.
+        threading.Thread(target=start_ollama, args=(cfg.llm_url,), daemon=True).start()
 
     server = None
     try:

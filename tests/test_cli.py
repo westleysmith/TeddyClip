@@ -388,3 +388,12 @@ def test_the_failure_message_says_where_the_recording_is(fake_pipeline, tiny_vid
     process_inbox(cfg, cut=True)
     out = capsys.readouterr().out
     assert "It stays in Raw recordings" not in out and "Finished recordings" in out
+
+
+def test_finding_clips_starts_ollama_when_it_is_not_running(fake_pipeline, tiny_video, cfg, monkeypatch):
+    fake_pipeline(trigger_at=8.0)
+    started = []
+    monkeypatch.setattr(cli.LLM, "available", lambda self: bool(started))
+    monkeypatch.setattr(cli, "start_ollama", lambda url: started.append(url) or True)
+    process_recording(stage_in_inbox(tiny_video, cfg), cfg)
+    assert started == [cfg.llm_url]
