@@ -387,7 +387,10 @@ def archive_session(cfg: Config, name: str, back: bool = False) -> Path:
             notes.rename(session.session_dir(cfg, dst.name))
             data = session.load(cfg, dst.name)
             if data is not None:
-                session.save(cfg, {**data, "name": dst.name})
+                preview = data.get("preview")
+                if preview:
+                    preview = str(session.session_dir(cfg, dst.name) / Path(preview).name)
+                session.save(cfg, {**data, "name": dst.name, "preview": preview})
     return dst
 
 
@@ -410,7 +413,16 @@ def make_handler(cfg: Config, job: Job):
         def _error(self, status, message: str) -> None:
             self._json({"error": message}, status)
 
+        def _from_elsewhere(self) -> bool:
+            """A request whose Host is not this server. A web page that points
+            its own domain at 127.0.0.1 (DNS rebinding) sends its own Host, so
+            it cannot read clips or transcripts."""
+            port = self.server.server_address[1]
+            return self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}")
+
         def do_GET(self) -> None:
+            if self._from_elsewhere():
+                return self._error(HTTPStatus.FORBIDDEN, "not allowed")
             path = unquote(urlparse(self.path).path)
             if path == "/":
                 body = PAGE.read_bytes()
@@ -506,6 +518,8 @@ def make_handler(cfg: Config, job: Job):
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
+            if self._from_elsewhere():
+                return self._error(HTTPStatus.FORBIDDEN, "not allowed")
             # Only TeddyClip's own page may act. A web page from elsewhere that
             # tries to post here carries its own Origin and is refused.
             port = self.server.server_address[1]

@@ -108,3 +108,11 @@ def test_cutting_works_while_clips_are_being_found(cfg, saved):
         assert editing.cut_clip(cfg, NAME, 1.0, 3.0, "During a run").exists()
     finally:
         gate.set()
+
+
+def test_a_replaced_clip_goes_to_the_recycle_bin(cfg, saved, monkeypatch):
+    binned = []
+    monkeypatch.setattr(ui, "to_recycle_bin", lambda p: (binned.append(p.name), p.unlink()))
+    old = editing.cut_clip(cfg, NAME, 1.0, 4.0, "Game over")
+    new = editing.cut_clip(cfg, NAME, 2.0, 5.0, "Game over", replace=old.name)
+    assert binned == [old.name] and new.exists() and not old.exists()

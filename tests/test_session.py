@@ -77,3 +77,29 @@ def test_record_made_adds_and_replaces(cfg):
     assert session.load(cfg, name)["made"] == data["made"]
     again = session.record_made(cfg, name, {**b, "end": 9.5})  # same file: one entry
     assert [m["file"] for m in again["made"]] == ["a2.mp4", "b.mp4"] and again["made"][-1]["end"] == 9.5
+
+
+def test_save_retries_while_windows_holds_the_file(cfg, monkeypatch):
+    real = session.os.replace
+    calls = []
+
+    def busy_twice(a, b):
+        calls.append(a)
+        if len(calls) <= 2:
+            raise PermissionError("in use")
+        return real(a, b)
+
+    monkeypatch.setattr(session.os, "replace", busy_twice)
+    monkeypatch.setattr(session.time, "sleep", lambda s: None)
+    path = session.save(cfg, _build())
+    assert len(calls) == 3 and json.loads(path.read_text(encoding="utf-8"))["name"] == "2026-11-04 Lego"
+
+
+def test_save_that_keeps_failing_raises_and_leaves_no_tmp(cfg, monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(session.os, "replace", lambda a, b: (_ for _ in ()).throw(PermissionError("in use")))
+    monkeypatch.setattr(session.time, "sleep", lambda s: None)
+    with pytest.raises(PermissionError):
+        session.save(cfg, _build())
+    assert not list(session.session_dir(cfg, "2026-11-04 Lego").glob("*.tmp"))

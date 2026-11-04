@@ -9,6 +9,7 @@ import contextlib
 import json
 import math
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,7 @@ from teddyclip.transcribe import Segment
 
 VERSION = 1
 FILE_NAME = "session.json"
+SAVE_TRIES = 10
 
 
 def session_dir(cfg: Config, name: str) -> Path:
@@ -72,7 +74,19 @@ def save(cfg: Config, data: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        # Windows refuses to replace a file another thread is reading for a
+        # moment (the main page polls every session file), so try a few times.
+        for attempt in range(SAVE_TRIES):
+            try:
+                os.replace(tmp, path)
+                return path
+            except PermissionError:
+                if attempt == SAVE_TRIES - 1:
+                    raise
+                time.sleep(0.1)
+    finally:
+        tmp.unlink(missing_ok=True)
     return path
 
 

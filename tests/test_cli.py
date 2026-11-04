@@ -337,3 +337,54 @@ def test_cut_all_flag_reaches_the_inbox_run(cfg, tmp_path, monkeypatch, argv, cu
     conf = tmp_path / "config.yaml"
     conf.write_text(f"root: '{cfg.root}'\n", encoding="utf-8")
     assert main(["--config", str(conf), *argv]) == 0 and seen == [cut]
+
+
+@pytest.mark.parametrize("taken", ["archived", "session file", "finished mp4 for an mkv"])
+def test_a_new_session_never_reuses_a_name_still_in_use(fake_pipeline, tiny_video, cfg, taken):
+    fake_pipeline(trigger_at=8.0)
+    src = tiny_video
+    if taken == "finished mp4 for an mkv":
+        src = tiny_video.with_suffix(".mkv")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tiny_video), "-c", "copy", str(src)], check=True)
+    staged = stage_in_inbox(src, cfg)
+    date = time.strftime("%Y-%m-%d", time.localtime(staged.stat().st_mtime))
+    name = f"{date} tiny"
+    cfg.paths.ensure()
+    if taken == "archived":
+        (cfg.paths.clips / "Archived" / name).mkdir(parents=True)
+    elif taken == "session file":
+        session.session_dir(cfg, name).mkdir(parents=True)
+    else:
+        (cfg.paths.done / f"{name}.mp4").write_bytes(b"older session")
+    assert process_recording(staged, cfg).name == f"{name} (2)"
+
+
+def test_a_preview_that_fails_still_leaves_a_usable_session(fake_pipeline, tiny_video, cfg, monkeypatch, capsys):
+    fake_pipeline(trigger_at=8.0)
+    monkeypatch.setattr(cli, "window_playable", lambda p: False)
+    monkeypatch.setattr(cli, "make_preview", lambda *a: (_ for _ in ()).throw(RuntimeError("encoder said no")))
+    out = process_recording(stage_in_inbox(tiny_video, cfg), cfg)
+    data = session.load(cfg, out.name)
+    assert data["preview"] is None and data["suggestions"] and out.name.endswith("tiny")
+    assert "encoder said no" in capsys.readouterr().out
+
+
+def test_cutting_that_fails_after_filing_keeps_the_session(fake_pipeline, tiny_video, cfg, monkeypatch):
+    fake_pipeline(trigger_at=8.0)
+    monkeypatch.setattr(cli, "write_clips", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full")))
+    src = stage_in_inbox(tiny_video, cfg)
+    with pytest.raises(RuntimeError, match="disk full"):
+        process_recording(src, cfg, cut=True)
+    folders = [p.name for p in cfg.paths.clips.iterdir()]
+    assert len(folders) == 1 and "incomplete" not in folders[0]
+    assert session.load(cfg, folders[0])["suggestions"]
+
+
+def test_the_failure_message_says_where_the_recording_is(fake_pipeline, tiny_video, cfg, monkeypatch, capsys):
+    fake_pipeline(trigger_at=8.0)
+    monkeypatch.setattr(cli, "write_clips", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk full")))
+    monkeypatch.setattr(cli, "is_finished", lambda p: True)
+    stage_in_inbox(tiny_video, cfg)
+    process_inbox(cfg, cut=True)
+    out = capsys.readouterr().out
+    assert "It stays in Raw recordings" not in out and "Finished recordings" in out

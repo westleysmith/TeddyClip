@@ -355,3 +355,23 @@ def test_restoring_into_a_taken_name_takes_the_session_file_along(server, cfg, f
     moved = f"{found} (2)"
     data = sessions.load(cfg, moved)
     assert data is not None and data["name"] == moved and sessions.load(cfg, found) is None
+
+
+@pytest.mark.parametrize("host", ["evil.example", "evil.example:8765", "127.0.0.1.evil.example"])
+def test_pages_on_other_hosts_cannot_read_through_rebinding(server, found, host):
+    with pytest.raises(urllib.error.HTTPError) as e:
+        get(server + "/api/session/" + quote(found), {"Host": host})
+    assert e.value.code == 403
+
+
+def test_restoring_a_renamed_session_rewrites_its_preview(server, cfg, found):
+    from teddyclip import session as sessions
+
+    preview = sessions.session_dir(cfg, found) / "preview.mp4"
+    preview.write_bytes(b"x")
+    sessions.save(cfg, {**sessions.load(cfg, found), "preview": str(preview)})
+    post(server + "/api/archive", {"session": found})
+    (cfg.paths.clips / found).mkdir()
+    post(server + "/api/unarchive", {"session": found})
+    moved = sessions.load(cfg, f"{found} (2)")
+    assert moved["preview"] == str(sessions.session_dir(cfg, f"{found} (2)") / "preview.mp4")

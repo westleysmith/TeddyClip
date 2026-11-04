@@ -115,7 +115,8 @@ def is_finished(path: Path, quiet_seconds: float = QUIET_SECONDS, now: float | N
 
 def _folder_name(path: Path, cfg: Config, mtime: float) -> str:
     """"<date> <game>": the recording's date and its inbox subfolder (or its
-    file name). " (2)", " (3)" are added while that name is taken in the clip or finished folders."""
+    file name). " (2)", " (3)" are added while anything still uses that name:
+    a clip folder (archived too), a session file, or a filed original."""
     date = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
     try:
         parts = path.relative_to(cfg.paths.inbox).parts
@@ -123,8 +124,15 @@ def _folder_name(path: Path, cfg: Config, mtime: float) -> str:
         parts = (path.name,)
     base = f"{date} {parts[0] if len(parts) > 1 else path.stem}"
     name, n = base, 1
-    suffix = path.suffix or ".mp4"
-    while (cfg.paths.clips / name).exists() or (cfg.paths.done / f"{name}{suffix}").exists():
+    suffixes = {(path.suffix or ".mp4").lower(), ".mp4", ".mkv"}
+
+    def taken(candidate: str) -> bool:
+        paths = cfg.paths
+        return ((paths.clips / candidate).exists() or (paths.clips / "Archived" / candidate).exists()
+                or session.session_dir(cfg, candidate).exists()
+                or any((paths.done / f"{candidate}{s}").exists() for s in suffixes))
+
+    while taken(name):
         n += 1
         name = f"{base} ({n})"
     return name
@@ -162,11 +170,12 @@ def _check_room_for_original(src: Path, done: Path) -> None:
         )
 
 
-def _mark_incomplete(out_dir: Path) -> Path | None:
+def _mark_incomplete(out_dir: Path, notes: Path | None = None) -> Path | None:
     """Rename the clip folder of a failed run to "<name> (incomplete)", or
     "(incomplete 2)" and so on when that is taken, so the next run gets the
-    clean name. Returns the new folder, or None when there was nothing to
-    rename or the rename itself failed."""
+    clean name. The run's notes folder (`notes`) gets the same new name, so it
+    does not hold the clean name either. Returns the new folder, or None when
+    there was nothing to rename or the rename itself failed."""
     if not out_dir.is_dir():
         return None
     target, n = out_dir.with_name(f"{out_dir.name} (incomplete)"), 1
@@ -175,6 +184,8 @@ def _mark_incomplete(out_dir: Path) -> Path | None:
         target = out_dir.with_name(f"{out_dir.name} (incomplete {n})")
     try:
         out_dir.rename(target)
+        if notes is not None and notes.is_dir() and not notes.with_name(target.name).exists():
+            notes.rename(notes.with_name(target.name))
     except OSError:
         return None
     print(f"The clips made so far are in \"{target.name}\".")
@@ -304,23 +315,28 @@ def process_recording(path: Path, cfg: Config, cut: bool = False) -> Path:
             if in_inbox:
                 print("Moving the original to Finished recordings...")
             recording = file_original(path, paths.done, name, in_inbox)
-        preview = None
-        if not window_playable(recording):
-            print("Making a preview copy the TeddyClip window can play...")
+        # Saved straight away: once the original has moved, the session must
+        # be usable even if a later step fails.
+        data = session.build(name, recording, None, info.duration, segments, laughter, _highest(shout, jumps), moments)
+        session.save(cfg, data)
+    except BaseException:
+        _mark_incomplete(out_dir, session.session_dir(cfg, name))
+        raise
+    if not window_playable(recording):
+        print("Making a preview copy the TeddyClip window can play...")
+        try:
             with progress.band(0.95, 1.00 if not cut else 0.97, "Making a preview the window can play"):
                 preview = make_preview(recording, session.session_dir(cfg, name) / "preview.mp4")
-        yelling = _highest(shout, jumps)
-        session.save(cfg, session.build(name, recording, preview, info.duration, segments,
-                                        laughter, yelling, moments))
-        if cut:
-            with progress.band(0.97, 1.00, "Cutting clips"):
-                clips = write_clips(recording, moments, out_dir)
-            for number, (clip, m) in enumerate(zip(clips, sorted(kept, key=lambda m: m.start)), start=1):
-                session.record_made(cfg, name, {"file": clip.name, "start": round(m.start, 1), "end": round(m.end, 1),
-                                                "title": m.title, "suggestion": number})
-    except BaseException:
-        _mark_incomplete(out_dir)
-        raise
+            session.save(cfg, {**data, "preview": str(preview)})
+        except Exception as e:
+            print(f"Could not make the preview ({_summary(_describe(e))}). "
+                  "The suggestions are saved, but the editor may not be able to play this recording.")
+    if cut:
+        with progress.band(0.97, 1.00, "Cutting clips"):
+            clips = write_clips(recording, moments, out_dir)
+        for number, (clip, m) in enumerate(zip(clips, sorted(kept, key=lambda m: m.start)), start=1):
+            session.record_made(cfg, name, {"file": clip.name, "start": round(m.start, 1), "end": round(m.end, 1),
+                                            "title": m.title, "suggestion": number})
     # The transcript and AI answers stay cached; the audio is only needed again
     # if the recording is processed again, and costs over 1 GB per 4 hours.
     for wav in (wav16, wav32):
@@ -385,7 +401,10 @@ def process_inbox(cfg: Config, only: list[str] | None = None, cut: bool = False)
                 processed.append(process_recording(path, cfg, cut=cut))
         except Exception as e:
             print(f"Could not process {path.name}: {_describe(e)}")
-            print("It stays in Raw recordings, so you can fix the problem and run TeddyClip again.")
+            if path.exists():
+                print("It stays in Raw recordings, so you can fix the problem and run TeddyClip again.")
+            else:
+                print("The recording is already in Finished recordings and its suggestions are saved.")
             failed.append((path, _describe(e)))
 
     print(f"\nDone: {len(processed)} processed, {len(failed)} failed")

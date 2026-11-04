@@ -81,8 +81,10 @@ def cut_clip(cfg: Config, name: str, start: object, end: object, title: str,
         taken = {p.name.lower() for p in folder.glob("*.mp4")} - ({replace.lower()} if replace else set())
         file = _unique_name(f"{_stamp(start)} - {clip_title}.mp4", taken)
         clip = media.cut(recording, start, end, folder / file)
-        if replace and replace.lower() != file.lower():
-            (folder / replace).unlink(missing_ok=True)
+        if replace and replace.lower() != file.lower() and (folder / replace).is_file():
+            from teddyclip.ui import to_recycle_bin  # the page's own delete, so Teddy can get it back
+
+            to_recycle_bin(folder / replace)
         session.record_made(cfg, name, {"file": file, "start": round(start, 1), "end": round(end, 1),
                                         "title": clip_title, "suggestion": suggestion}, replace=replace)
     return clip
