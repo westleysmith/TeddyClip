@@ -123,7 +123,7 @@ if ($nvidia) {
     Write-Host "NVIDIA graphics card found: adding GPU support for faster transcription."
     & $venvPy -m pip install --quiet -e ".[gpu]"
 } else {
-    Write-Host "No NVIDIA graphics card found: transcription will use the CPU."
+    Write-Host "No NVIDIA graphics card found: transcription will run on your other graphics card through Vulkan (set up in step 5)."
     & $venvPy -m pip install --quiet -e .
 }
 if ($LASTEXITCODE -ne 0) { Fail "could not install TeddyClip's packages." }

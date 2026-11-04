@@ -29,8 +29,13 @@ jobs:
 
       - name: Build
         run: |
-          cmake -S src -B build -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=ON -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release --parallel 4 --target whisper-cli
+          # GGML_NATIVE=OFF: do not tune for this build machine's processor (a laptop
+          # without its newer instructions crashed with "illegal instruction").
+          # GGML_CPU_ALL_VARIANTS builds the CPU code for several processor
+          # generations as separate DLLs, and GGML_BACKEND_DL loads the best one
+          # (and the Vulkan backend) when whisper-cli starts.
+          cmake -S src -B build -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DBUILD_SHARED_LIBS=ON -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel 4
 
       - name: Package
         shell: pwsh
