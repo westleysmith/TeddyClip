@@ -60,3 +60,31 @@ def test_progress_never_goes_backwards():
     job._progress("Transcribing", 0.4)
     job._progress("Measuring loudness", 0.2)
     assert job.state()["fraction"] == 0.4 and job.state()["step"] == "Measuring loudness"
+
+
+def test_job_keeps_the_pc_awake_only_while_it_runs(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ui, "stay_awake", lambda on: calls.append(on))
+    job = ui.Job()
+    job.start("Making clips", lambda: calls.append("working") or 0)
+    for _ in range(100):
+        if not job.state()["running"]:
+            break
+        time.sleep(0.02)
+    assert calls == [True, "working", False]
+
+
+def test_job_lets_the_pc_sleep_again_after_a_crash(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ui, "stay_awake", lambda on: calls.append(on))
+
+    def boom():
+        raise RuntimeError("bug")
+
+    job = ui.Job()
+    job.start("Making clips", boom)
+    for _ in range(100):
+        if not job.state()["running"]:
+            break
+        time.sleep(0.02)
+    assert calls == [True, False] and job.state()["failed"]

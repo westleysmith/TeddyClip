@@ -53,6 +53,7 @@ class Job:
 
     def _run(self, work) -> None:
         progress.listen(self._progress)
+        stay_awake(True)
         try:
             with contextlib.redirect_stdout(_Tee(self)):
                 self.failed = bool(work())
@@ -60,6 +61,7 @@ class Job:
             self.write(f"\nSomething went wrong: {e}\n")
             self.failed = True
         finally:
+            stay_awake(False)
             progress.listen(None)
             self.write("\n")
             with self.lock:
@@ -87,6 +89,24 @@ class Job:
             step, fraction = self.step, self.fraction
         return {"name": self.name, "running": self.running, "failed": self.failed, "lines": lines[-80:],
                 "step": step, "fraction": round(fraction, 4), "elapsed": round(elapsed, 1)}
+
+
+ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+def stay_awake(on: bool) -> None:
+    """Keep the PC from going to sleep while a job runs. The screen can still
+    turn off and lock. Windows ties this to the calling thread, so the job's
+    own thread switches it on and back off."""
+    if os.name != "nt":
+        return
+    import ctypes
+
+    flags = ES_CONTINUOUS | ES_SYSTEM_REQUIRED if on else ES_CONTINUOUS
+    try:
+        ctypes.windll.kernel32.SetThreadExecutionState(flags)
+    except (AttributeError, OSError):
+        pass
 
 
 class _Tee:
