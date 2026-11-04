@@ -7,7 +7,8 @@ param(
     [switch]$SkipPrograms,   # do not install Python, FFmpeg or Ollama (for testing)
     [switch]$SkipModels,     # do not download the AI models (for testing)
     [switch]$SkipShortcuts,  # do not add desktop shortcuts (for testing)
-    [string[]]$Names = @()   # the two names for clip titles, skips the question
+    [string[]]$Names = @(),  # the two names for clip titles, skips the question
+    [string]$DataDir = ""    # where recordings and clips go, skips the question
 )
 
 # Native programs report failure through exit codes, which every step checks;
@@ -51,6 +52,29 @@ function Find-Python312 {
     return $null
 }
 
+function Free-GB($path) {
+    try { return [math]::Round(([IO.DriveInfo]::new([IO.Path]::GetPathRoot($path))).AvailableFreeSpace / 1GB) }
+    catch { return '?' }
+}
+
+# A plain Windows dialog: keep the suggested place, or pick another one (a
+# bigger drive, say). A folder named TeddyClip is made inside the one picked.
+function Choose-DataFolder($suggested) {
+    Add-Type -AssemblyName System.Windows.Forms
+    $owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false }
+    $text = "TeddyClip keeps your recordings, clips, highlight videos and its AI models in one folder:`n`n" +
+            "      $suggested`n`n$(Free-GB $suggested) GB is free on that drive. Recordings take a few GB per hour of play.`n`n" +
+            "Keep it there?  Choose No to pick another place, for example a bigger drive."
+    $answer = [System.Windows.Forms.MessageBox]::Show($owner, $text, 'TeddyClip: where should your clips go?', 'YesNo', 'Question')
+    if ($answer -ne 'No') { return $suggested }
+    $pick = New-Object System.Windows.Forms.FolderBrowserDialog
+    $pick.Description = 'Pick where TeddyClip should keep everything. A folder named TeddyClip is made inside the one you pick.'
+    $pick.ShowNewFolderButton = $true
+    if ($pick.ShowDialog($owner) -ne 'OK' -or -not $pick.SelectedPath) { return $suggested }
+    if ((Split-Path $pick.SelectedPath -Leaf) -eq 'TeddyClip') { return $pick.SelectedPath }
+    return (Join-Path $pick.SelectedPath 'TeddyClip')
+}
+
 function Find-Ollama {
     if (Has-Command 'ollama') { return (Get-Command ollama).Source }
     $guess = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
@@ -63,7 +87,7 @@ Write-Host "This sets up everything TeddyClip needs. Leave this window open unti
 
 # 1. Programs
 if (-not $SkipPrograms) {
-    Say "Step 1 of 6: programs (Python, FFmpeg, Ollama)"
+    Say "Step 1 of 7: programs (Python, FFmpeg, Ollama)"
     if (-not (Has-Command 'winget')) {
         Fail "winget is missing. Open the Microsoft Store, install 'App Installer', then run this again."
     }
@@ -72,13 +96,13 @@ if (-not $SkipPrograms) {
     Install-Program 'Gyan.FFmpeg' 'FFmpeg'
     Install-Program 'Ollama.Ollama' 'Ollama'
 } else {
-    Say "Step 1 of 6: skipped installing programs"
+    Say "Step 1 of 7: skipped installing programs"
 }
 $Python = Find-Python312
 if (-not $Python) { Fail "Python 3.12 was not found after installing it. Restart the PC and run this again." }
 
 # 2. TeddyClip itself
-Say "Step 2 of 6: TeddyClip files"
+Say "Step 2 of 7: TeddyClip files"
 if (-not $InstallDir) {
     if (Test-Path (Join-Path $PSScriptRoot 'pyproject.toml')) { $InstallDir = $PSScriptRoot }
     else { $InstallDir = Join-Path $env:LOCALAPPDATA 'TeddyClip-app' }
@@ -108,7 +132,7 @@ if ($fromRepo) {
 Set-Location $InstallDir
 
 # 3. Python packages
-Say "Step 3 of 6: TeddyClip's Python packages (a few hundred MB, takes a while)"
+Say "Step 3 of 7: TeddyClip's Python packages (a few hundred MB, takes a while)"
 $venvPy = Join-Path $InstallDir '.venv\Scripts\python.exe'
 if (-not (Test-Path $venvPy)) {
     & $Python -m venv .venv
@@ -129,7 +153,7 @@ if ($nvidia) {
 if ($LASTEXITCODE -ne 0) { Fail "could not install TeddyClip's packages." }
 
 # 4. Names for clip titles
-Say "Step 4 of 6: your names"
+Say "Step 4 of 7: your names"
 $config = Join-Path $InstallDir 'config.yaml'
 $text = Get-Content $config -Raw -Encoding UTF8
 if ($text -match '(?m)^people: \[Teddy, Friend\]') {
@@ -153,9 +177,26 @@ if ($text -match '(?m)^people: \[Teddy, Friend\]') {
     Write-Host "Names are already set in config.yaml."
 }
 
-# 5. AI models
+# 5. Where everything goes (before the models, which are kept there too)
+Say "Step 5 of 7: where to keep your recordings and clips"
+$text = Get-Content $config -Raw -Encoding UTF8
+if ($text -match '(?m)^root:\s*C:\\Users\\\{user\}\\TeddyClip\s*$') {
+    $suggested = Join-Path $env:USERPROFILE 'TeddyClip'
+    if (-not $DataDir) { $DataDir = Choose-DataFolder $suggested }
+    $DataDir = [IO.Path]::GetFullPath($DataDir).TrimEnd('\')
+    if ($DataDir -ne $suggested) {
+        $line = "root: '" + ($DataDir -replace "'", "''") + "'"
+        $text = [regex]::Replace($text, '(?m)^root:.*$', { param($m) $line })
+        Write-Utf8 $config $text
+    }
+    Write-Host "TeddyClip will keep everything in $DataDir"
+} else {
+    Write-Host "Keeping the folder already set in config.yaml."
+}
+
+# 6. AI models
 if (-not $SkipModels) {
-    Say "Step 5 of 6: AI models (a few GB on the first run)"
+    Say "Step 6 of 7: AI models (a few GB on the first run)"
     $model = 'qwen3:4b'
     if ($text -match '(?m)^\s+model:\s*([^\s#]+)') { $model = $Matches[1] }
     $ollama = Find-Ollama
@@ -213,11 +254,11 @@ download_model('$whisper')
         }
     }
 } else {
-    Say "Step 5 of 6: skipped downloading models"
+    Say "Step 6 of 7: skipped downloading models"
 }
 
-# 6. Shortcuts and a final check
-Say "Step 6 of 6: desktop shortcuts"
+# 7. Shortcuts and a final check
+Say "Step 7 of 7: folders and desktop shortcuts"
 $root = (& $venvPy -c "from teddyclip.config import load_config; c = load_config(); c.paths.ensure(); print(c.root)").Trim()
 $desktop = [Environment]::GetFolderPath('Desktop')
 if ($SkipShortcuts) { $desktop = Join-Path $InstallDir 'shortcuts-test'; New-Item -ItemType Directory -Force $desktop | Out-Null }
@@ -251,9 +292,10 @@ Say "Checking everything"
 
 Write-Host ""
 Write-Host "All done!" -ForegroundColor Green
+Write-Host "Your recordings and clips live in: $root"
 Write-Host "How to use it:"
 Write-Host "  1. Double-click 'TeddyClip' on the desktop. It opens in its own window."
-Write-Host "  2. Click 'Add recordings' and put your OBS recordings in that folder."
-Write-Host "  3. Click 'Make clips' and let it run."
-Write-Host "  4. Watch the clips, delete the ones you don't like, then click 'Make highlight'."
-Write-Host "Tip: say 'clip that' out loud while recording and that moment always becomes a clip."
+Write-Host "  2. Click 'Add recordings' and pick your OBS recordings and the game."
+Write-Host "  3. Click 'Find clips' and let it run. It suggests the best moments."
+Write-Host "  4. Click 'Review' on a suggestion, move its start and end, and click 'Create clip'."
+Write-Host "Tip: say 'clip that' out loud while recording and that moment is always suggested."

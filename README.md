@@ -27,7 +27,7 @@ No typing needed. On Windows 10 or 11:
 
 1. Download [`Install TeddyClip.bat`](https://raw.githubusercontent.com/westleysmith/TeddyClip/main/Install%20TeddyClip.bat) (right-click the link, choose "Save link as"), or get the file from whoever set TeddyClip up for you.
 2. Double-click it. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. If it asks whether the app may make changes, click **Yes**.
-3. Type your two names when it asks (they go in clip titles), then leave the window open. The first install downloads a few GB and can take 20 to 40 minutes.
+3. Type your two names when it asks (they go in clip titles). A window then asks where TeddyClip should keep your recordings, clips and AI models: click **Yes** for the suggested folder, or **No** to pick another place, such as a bigger drive. Then leave the window open. The first install downloads a few GB and can take 20 to 40 minutes.
 4. When it says **All done!**, two shortcuts are on your desktop:
    - **TeddyClip** opens TeddyClip in its own window. Everything happens there.
    - **TeddyClip Folders** opens the folder where recordings go in and clips come out.
