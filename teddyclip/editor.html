@@ -33,10 +33,10 @@
   video { width: 100%; max-height: 58vh; aspect-ratio: 16 / 9; background: #1f1712; border-radius: 14px; display: block; }
   .label { font-size: 13px; color: var(--muted); display: flex; gap: 10px; align-items: baseline; }
   .label b { color: var(--ink); font-size: 15px; }
-  .strip { position: relative; height: 34px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--card);
+  .strip { position: relative; height: 46px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--card);
            overflow: hidden; cursor: pointer; touch-action: none; }
   .strip canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  #zoom { height: 52px; }
+  #zoom { height: 64px; }
   .sel { position: absolute; top: 0; bottom: 0; background: rgba(217, 162, 39, .28); border-left: 0; border-right: 0; }
   .handle { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; cursor: ew-resize; z-index: 2; }
   .handle::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 6px; border-radius: 3px;
@@ -52,20 +52,22 @@
                 border: 1.5px solid var(--line); background: var(--cream); color: var(--ink); }
   .make input:focus, #search:focus { outline: none; border-color: var(--orange); }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
-  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+  .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
   aside { display: flex; flex-direction: column; min-height: 0; background: var(--card); border: 1.5px solid var(--line);
           border-radius: 18px; padding: 12px; gap: 8px; }
   #search { font: inherit; padding: 7px 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--cream);
             color: var(--ink); width: 100%; }
   #hits { font-size: 12px; min-height: 18px; }
-  #lines { flex: 1; min-height: 200px; overflow-y: auto; font-size: 14px; padding-right: 4px; }
+  #lines { position: relative; flex: 1; min-height: 200px; overflow-y: auto; font-size: 14px; padding-right: 4px; }
+  button[hidden] { display: none; }
   .line { display: flex; gap: 8px; padding: 3px 8px; border-radius: 8px; cursor: pointer; border-left: 3px solid transparent; }
   .line:hover { background: var(--card-2); }
   .line .t { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; min-width: 52px; padding-top: 2px; }
   .line.in { background: rgba(217, 162, 39, .2); }
   .line.now { border-left-color: var(--walnut); }
-  .line .cue { font-size: 11px; font-weight: 700; margin-left: 6px; white-space: nowrap; }
-  .cue.laugh { color: #a5780f; } .cue.yell { color: var(--plum); }
+  .line .cue { display: inline-block; font-size: 11.5px; font-weight: 700; margin-left: 6px; white-space: nowrap;
+               padding: 0 8px; border-radius: 999px; line-height: 18px; vertical-align: 1px; }
+  .cue.laugh { background: var(--mustard); color: var(--ink); } .cue.yell { background: var(--plum); color: var(--cream); }
   mark { background: rgba(212, 97, 42, .3); color: inherit; border-radius: 3px; }
   .here { display: flex; gap: 8px; flex-wrap: wrap; }
   .notice { padding: 14px 16px; border-radius: 14px; background: var(--card); border: 1.5px solid var(--orange); }
@@ -123,6 +125,7 @@
     <div class="make">
       <input id="title" maxlength="80" placeholder="Name this clip" aria-label="Clip title">
       <button id="create" class="primary">Create clip</button>
+      <button id="save-new" hidden title="Keep the clip you made and save this range as another one">Save as new clip</button>
     </div>
     <div class="legend">
       <span><span class="sw" style="background:rgba(212,97,42,.45)"></span>suggested clip</span>
@@ -154,8 +157,11 @@ const FIRST = {trigger: 0, marker: 0};
 const video = $("video");
 
 let data = null, items = [], index = -1;
-let start = 0, end = 30, replace = null, suggestion = null;
-let zoomFrom = 0, zoomTo = 70, stopAt = null, userScrolled = 0, nowLine = -1;
+// replace: the made clip being edited (Update clip swaps it out); null for a new clip.
+// opened counts what is open, so a cut that finishes after Teddy moved on cannot
+// turn the next clip into an edit of the one just made.
+let start = 0, end = 30, replace = null, suggestion = null, opened = 0;
+let zoomFrom = 0, zoomTo = 70, stopAt = null, userScrolled = 0, ourScroll = 0, nowLine = -1;
 
 function clock(t) {
   t = Math.max(0, Math.round(t));
@@ -204,6 +210,7 @@ function setRange(a, b, keepZoom) {
 
 function openItem(i) {
   index = i;
+  opened++;
   const s = items[i];
   const made = s ? madeFor(s.id) : null;
   if (made) {
@@ -219,6 +226,7 @@ function openItem(i) {
 function openClip(file) {
   const made = (data.made || []).find((m) => m.file === file);
   if (!made) return false;
+  opened++;
   replace = made.file; suggestion = made.suggestion ?? null; $("title").value = made.title;
   index = items.findIndex((s) => s.id === suggestion);
   setRange(made.start, made.end);
@@ -232,6 +240,7 @@ function draw() {
   $("prev").disabled = !items.length; $("next").disabled = !items.length;
   $("range-text").textContent = `This clip: ${clock(start)} to ${clock(end)} · ${clock(end - start)} long`;
   $("create").textContent = replace ? "Update clip" : "Create clip";
+  $("save-new").hidden = !replace;
   drawStrip($("overview"), 0, data.duration, true);
   drawStrip($("zoom"), zoomFrom, zoomTo, false);
   const span = zoomTo - zoomFrom || 1, pct = (t) => `${((t - zoomFrom) / span) * 100}%`;
@@ -259,14 +268,22 @@ function drawStrip(strip, from, to, whole) {
   for (const s of items) if (s.end > from && s.start < to) g.fillRect(x(s.start), 0, Math.max(2, x(s.end) - x(s.start)), h);
   g.fillStyle = "rgba(43, 122, 116, .45)";
   for (const m of data.made || []) if (m.exists && m.end > from && m.start < to) g.fillRect(x(m.start), h * .3, Math.max(2, x(m.end) - x(m.start)), h * .4);
+  // Each mark is at least MARK_PX wide and half as tall as its lane, so a
+  // one-second laugh still stands out on a four-hour recording.
+  const MARK_PX = 4;
   const lane = (values, color, top) => {
-    g.fillStyle = color;
-    for (let px = 0; px < w; px++) {
+    const column = new Float32Array(Math.ceil(w));
+    for (let px = 0; px < column.length; px++) {
       const a = Math.floor(from + (px / w) * span), b = Math.max(a + 1, Math.ceil(from + ((px + 1) / w) * span));
+      for (let t = Math.max(0, a); t < b && t < values.length; t++) column[px] = Math.max(column[px], values[t] || 0);
+    }
+    g.fillStyle = color;
+    const laneH = h * 0.5;
+    for (let px = 0; px < column.length; px++) {
       let v = 0;
-      for (let t = a; t < b && t < values.length; t++) v = Math.max(v, values[t] || 0);
+      for (let k = Math.max(0, px - MARK_PX / 2); k <= Math.min(column.length - 1, px + MARK_PX / 2); k++) v = Math.max(v, column[k]);
       if (v < 0.15) continue;
-      const len = v * h * 0.45;
+      const len = laneH * (0.5 + 0.5 * Math.min(1, v));
       g.fillRect(px, top ? 0 : h - len, 1, len);
     }
   };
@@ -339,11 +356,19 @@ function follow() {
   nowLine = i;
   if (lines[i]) {
     lines[i].classList.add("now");
-    if (Date.now() - userScrolled > 4000) lines[i].scrollIntoView({block: "center"});
+    if (Date.now() - userScrolled > 4000) centerLine(lines[i]);
   }
 }
 
-$("lines").addEventListener("wheel", () => (userScrolled = Date.now()), {passive: true});
+// Scroll only the transcript box (scrollIntoView would also scroll the page
+// and push the video out of view on a small screen).
+function centerLine(line) {
+  const box = $("lines");
+  ourScroll = Date.now();
+  box.scrollTop = Math.max(0, line.offsetTop - box.clientHeight / 2 + line.offsetHeight / 2);
+}
+
+$("lines").addEventListener("scroll", () => { if (Date.now() - ourScroll > 150) userScrolled = Date.now(); }, {passive: true});
 $("lines").addEventListener("click", (e) => {
   const line = e.target.closest(".line");
   if (line) { video.currentTime = data.segments[+line.dataset.i].start; userScrolled = 0; }
@@ -359,7 +384,7 @@ $("search").addEventListener("keydown", (e) => {
   const seg = data.segments[+next.closest(".line").dataset.i];
   video.currentTime = seg.start;
   userScrolled = 0;
-  next.closest(".line").scrollIntoView({block: "center"});
+  centerLine(next.closest(".line"));
 });
 
 // Strips: click to jump, drag the edges
@@ -403,8 +428,25 @@ document.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("cli
   else { setRange(start, end + by); video.currentTime = Math.max(start, end - 5); }
 }));
 
-$("start-here").onclick = () => setRange(Math.min(video.currentTime, end - MIN_LEN), end);
-$("end-here").onclick = () => setRange(start, Math.max(video.currentTime, start + MIN_LEN));
+// A range somewhere else in the recording is a new clip, never an edit of the
+// clip that was open: it keeps that clip's length and starts with no title.
+function newClipAt(a, b) {
+  opened++;
+  index = -1; replace = null; suggestion = null;
+  $("title").value = "";
+  setRange(a, b);
+}
+
+$("start-here").onclick = () => {
+  const t = video.currentTime;
+  if (t <= end - MIN_LEN) setRange(t, end);
+  else newClipAt(t, t + (end - start));
+};
+$("end-here").onclick = () => {
+  const t = video.currentTime;
+  if (t >= start + MIN_LEN) setRange(start, t);
+  else newClipAt(Math.max(0, t - (end - start)), t);
+};
 
 $("play-clip").onclick = () => {
   video.currentTime = start;
@@ -425,26 +467,28 @@ video.addEventListener("seeking", () => { if (stopAt !== null && (video.currentT
 
 // Making the clip
 
-$("create").onclick = async () => {
-  const button = $("create"), label = button.textContent;
-  button.disabled = true;
+async function cut(button, swap) {
+  const label = button.textContent, mine = opened;
+  $("create").disabled = $("save-new").disabled = true;
   button.textContent = "Cutting...";
   try {
     const r = await fetch("/api/cut", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({session: NAME, start, end, title: $("title").value, replace, suggestion})});
+      body: JSON.stringify({session: NAME, start, end, title: $("title").value, replace: swap ? replace : null, suggestion})});
     const body = await r.json().catch(() => ({}));
     if (!r.ok) { message(body.error || "The clip could not be made."); return; }
-    replace = body.file;
+    if (mine === opened) replace = body.file;  // still on this clip: further changes update it
     await load();
     toast(`Saved "${body.file}" in 2 - Clips`);
   } catch (e) {
     message("TeddyClip is not running. Open it again from the desktop shortcut.");
   } finally {
-    button.disabled = false;
+    $("create").disabled = $("save-new").disabled = false;
     button.textContent = label;
     if (data) draw();
   }
-};
+}
+$("create").onclick = () => cut($("create"), true);
+$("save-new").onclick = () => cut($("save-new"), false);
 
 $("prev").onclick = () => items.length && openItem(index <= 0 ? items.length - 1 : index - 1);
 $("next").onclick = () => items.length && openItem(index < 0 || index >= items.length - 1 ? 0 : index + 1);
