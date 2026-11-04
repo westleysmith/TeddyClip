@@ -26,7 +26,7 @@ No typing needed. On Windows 10 or 11:
 2. Double-click it. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. If it asks whether the app may make changes, click **Yes**.
 3. Type your two names when it asks (they go in clip titles), then leave the window open. The first install downloads a few GB and can take 20 to 40 minutes.
 4. When it says **All done!**, two shortcuts are on your desktop:
-   - **TeddyClip** opens the TeddyClip page in your web browser. Everything happens there.
+   - **TeddyClip** opens TeddyClip in its own window. Everything happens there.
    - **TeddyClip Folders** opens the folder where recordings go in and clips come out.
 
 It installs Python 3.12, FFmpeg and Ollama (with winget), puts TeddyClip in `%LOCALAPPDATA%\TeddyClip-app`, adds GPU support when it finds an NVIDIA card, and downloads the AI models so the first run starts straight away. Run it again any time to update TeddyClip; your settings in `config.yaml` are kept.
@@ -71,7 +71,7 @@ The first real run downloads the whisper speech model and the laughter and shout
 ## Daily use
 
 1. Record your session in OBS. Set it up once using the [OBS setup guide](docs/obs-setup.md). While you play, say **"clip that"** out loud whenever something is worth keeping. Every one of those moments is guaranteed a clip.
-2. Double-click **TeddyClip** on the desktop (or `Open TeddyClip.bat` in the app folder). It opens a page in your web browser. Keep the small window that opens with it running while you use the page; it is only reachable from your own PC.
+2. Double-click **TeddyClip** on the desktop or in the Start menu. It opens in its own window. Close the window when you are done; that quits TeddyClip. (Prefer your web browser? `Open TeddyClip.bat` in the app folder shows the same page there.)
 3. Click **Add recordings** and put your recordings in the folder that opens (`1 Inbox`). You can drop them straight in, or inside a folder named after the game (for example `1 Inbox\Elden Ring`). The folder name is used in the clip folder name, and for some games it turns on screen-text detection such as YOU DIED.
 4. Click **Make clips**. The page shows what it is doing. A 4 hour session takes a while, so leave it running. Recordings OBS is still writing are left alone.
 5. Watch the clips on the page and click **Delete** on the ones you don't want (they go to the Recycle Bin, so nothing is lost by accident).

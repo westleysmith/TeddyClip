@@ -72,9 +72,13 @@ def _tool(name: str) -> str:
     return path
 
 
+# The TeddyClip window has no console, so each ffmpeg run would otherwise flash one.
+NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
 def _run(cmd: list[str], what: str) -> subprocess.CompletedProcess:
     """Run a command (args are always a list, paths may contain spaces)."""
-    result = subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, capture_output=True, **NO_WINDOW)
     if result.returncode != 0:
         _fail(what, result)
     return result
@@ -179,6 +183,7 @@ def _probe_encoder(args: list[str]) -> bool:
             ],
             capture_output=True,
             timeout=30,
+            **NO_WINDOW,
         )
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError, RuntimeError):
@@ -234,11 +239,11 @@ def cut(src: Path, start: float, end: float, dst: Path) -> Path:
         "-movflags", "+faststart",
         str(dst.resolve()),
     ]
-    result = subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, capture_output=True, **NO_WINDOW)
     if result.returncode != 0 and enc != CPU_ARGS:
         # The start-up probe only sees a synthetic frame; the real footage can still be refused.
         log.warning("Hardware encoder refused %s, retrying on the CPU", Path(src).name)
-        result = subprocess.run(_swap_encoder(cmd, enc, CPU_ARGS), capture_output=True)
+        result = subprocess.run(_swap_encoder(cmd, enc, CPU_ARGS), capture_output=True, **NO_WINDOW)
     if result.returncode != 0:
         _fail(f"cut {Path(src).name} from {start:.1f}s to {end:.1f}s", result)
     return dst

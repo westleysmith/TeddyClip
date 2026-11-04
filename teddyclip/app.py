@@ -1,0 +1,94 @@
+"""TeddyClip as its own window: the TeddyClip page in a native Windows window
+(Edge WebView2, built into Windows), with no console and no browser. Closing
+the window quits TeddyClip. Started by the teddyclip-app.exe the installer's
+shortcut points at."""
+
+from __future__ import annotations
+
+import os
+import sys
+import threading
+from pathlib import Path
+
+from teddyclip import ui
+from teddyclip.config import Config, load_config
+
+ICON = Path(__file__).with_name("teddyclip.ico")
+APP_ID = "TeddyClip.App"
+
+
+def _config_path() -> Path | None:
+    """config.yaml in the current folder, else the one in the install folder
+    (the folder holding .venv), so the app finds it however it is started."""
+    here = Path.cwd() / "config.yaml"
+    if here.is_file():
+        return here
+    install = Path(sys.prefix).parent / "config.yaml"
+    return install if install.is_file() else None
+
+
+def _quiet_output(cfg: Config) -> None:
+    """A windowless program has no console: send anything printed (download
+    progress bars, warnings) to a log file instead of losing it or crashing."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    log = cfg.paths.cache / "teddyclip.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    stream = open(log, "a", encoding="utf-8", buffering=1)  # stays open for the app's life
+    sys.stdout = sys.stdout or stream
+    sys.stderr = sys.stderr or stream
+
+
+def _set_taskbar_identity() -> None:
+    """Own taskbar button and icon instead of being grouped under Python."""
+    if os.name == "nt":
+        import ctypes
+
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+        except (AttributeError, OSError):
+            pass
+
+
+def _set_window_icon(window) -> None:
+    """Put the starburst on the title bar and taskbar (WinForms backend)."""
+    try:
+        from System import Action
+        from System.Drawing import Icon
+
+        form = window.native
+        form.Invoke(Action(lambda: setattr(form, "Icon", Icon(str(ICON)))))
+    except Exception:
+        pass  # cosmetic only
+
+
+def main() -> int:
+    import webview
+
+    cfg = load_config(_config_path())
+    _quiet_output(cfg)
+    _set_taskbar_identity()
+
+    server = None
+    try:
+        server = ui.make_server(cfg, ui.PORT)
+    except OSError:
+        pass  # TeddyClip is already open: this window shows the same page
+    if server is not None:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    window = webview.create_window("TeddyClip", f"http://127.0.0.1:{ui.PORT}/",
+                                   width=1320, height=900, min_size=(760, 560),
+                                   background_color="#F3EAD8")
+    window.events.shown += lambda: _set_window_icon(window)
+    try:
+        webview.start()
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

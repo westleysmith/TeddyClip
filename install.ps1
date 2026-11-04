@@ -207,12 +207,13 @@ foreach ($old in 'TeddyClip - Make Clips', 'TeddyClip - Make Highlight') {
     Remove-Item (Join-Path $desktop "$old.lnk") -ErrorAction SilentlyContinue
 }
 $logo = Join-Path $InstallDir 'teddyclip\teddyclip.ico'
-$open = Join-Path $InstallDir 'Open TeddyClip.bat'
-Make-Shortcut $desktop 'TeddyClip' $open "$logo,0" 7
+# The TeddyClip window: a windowless launcher, so no console appears.
+$open = Join-Path $InstallDir '.venv\Scripts\teddyclip-app.exe'
+Make-Shortcut $desktop 'TeddyClip' $open "$logo,0"
 Make-Shortcut $desktop 'TeddyClip Folders' $root 'shell32.dll,3'
 if (-not $SkipShortcuts) {
     # Start menu too, so TeddyClip shows up when you search for it.
-    Make-Shortcut ([Environment]::GetFolderPath('Programs')) 'TeddyClip' $open "$logo,0" 7
+    Make-Shortcut ([Environment]::GetFolderPath('Programs')) 'TeddyClip' $open "$logo,0"
 }
 Write-Host "Added TeddyClip to the desktop and the Start menu, plus a TeddyClip Folders shortcut."
 Write-Host "To pin it, right-click the TeddyClip icon and choose Pin to taskbar or Pin to Start."
@@ -223,7 +224,7 @@ Say "Checking everything"
 Write-Host ""
 Write-Host "All done!" -ForegroundColor Green
 Write-Host "How to use it:"
-Write-Host "  1. Double-click 'TeddyClip' on the desktop. It opens in your web browser."
+Write-Host "  1. Double-click 'TeddyClip' on the desktop. It opens in its own window."
 Write-Host "  2. Click 'Add recordings' and put your OBS recordings in that folder."
 Write-Host "  3. Click 'Make clips' and let it run."
 Write-Host "  4. Watch the clips, delete the ones you don't like, then click 'Make highlight'."
