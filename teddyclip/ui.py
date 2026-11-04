@@ -176,6 +176,29 @@ def _raw_file(cfg: Config, name: str) -> Path | None:
     return path
 
 
+# Files this server is sending to the page right now (a preview playing).
+# Our own open handle must not make a recording look "still being recorded".
+_streaming: collections.Counter = collections.Counter()
+_streaming_lock = threading.Lock()
+
+
+def _stream_key(path: Path) -> str:
+    return os.path.normcase(str(Path(path).resolve()))
+
+
+def _ready(path: Path) -> bool:
+    """Like cli.is_finished, but a recording whose preview this server is
+    streaming still counts as finished once it has stopped changing."""
+    with _streaming_lock:
+        ours = _streaming[_stream_key(path)] > 0
+    if not ours:
+        return cli.is_finished(path)
+    try:
+        return time.time() - Path(path).stat().st_mtime >= cli.QUIET_SECONDS
+    except OSError:
+        return False
+
+
 def _media_url(kind: str, *parts: str) -> str:
     return "/media/" + kind + "/" + "/".join(quote(p) for p in parts)
 
@@ -298,7 +321,7 @@ def state(cfg: Config, job: Job) -> dict:
         for p in sorted(paths.inbox.rglob("*")):
             if p.is_file() and p.suffix.lower() in cli.VIDEO_SUFFIXES:
                 rel = p.relative_to(paths.inbox)
-                inbox.append({"name": str(rel), "ready": cli.is_finished(p),
+                inbox.append({"name": str(rel), "ready": _ready(p),
                               "size": p.stat().st_size, "url": _media_url("raw", *rel.parts)})
     sessions = []
     if paths.clips.is_dir():
@@ -506,15 +529,24 @@ def make_handler(cfg: Config, job: Job):
             if status == HTTPStatus.PARTIAL_CONTENT:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.end_headers()
-            with contextlib.suppress(ConnectionError), file.open("rb") as f:
-                f.seek(start)
-                left = end - start + 1
-                while left > 0:
-                    chunk = f.read(min(CHUNK, left))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    left -= len(chunk)
+            key = _stream_key(file)
+            with _streaming_lock:
+                _streaming[key] += 1
+            try:
+                with contextlib.suppress(ConnectionError), file.open("rb") as f:
+                    f.seek(start)
+                    left = end - start + 1
+                    while left > 0:
+                        chunk = f.read(min(CHUNK, left))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        left -= len(chunk)
+            finally:
+                with _streaming_lock:
+                    _streaming[key] -= 1
+                    if _streaming[key] <= 0:
+                        del _streaming[key]
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path

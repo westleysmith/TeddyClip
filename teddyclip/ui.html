@@ -487,7 +487,17 @@ $("add").onclick = async () => {
   if (game === null) return;
   if (await post("/api/add", {files, game})) refresh();
 };
-$("make").onclick = async () => { if (await post("/api/process", {files: picked()})) refresh(); };
+$("make").onclick = async () => {
+  // Close any preview first: while it plays, TeddyClip itself has the file
+  // open, and a file in use cannot be moved to Finished recordings.
+  if (openPreview.size) {
+    document.querySelectorAll(".raw-video").forEach((v) => { v.pause(); v.removeAttribute("src"); v.load(); });
+    openPreview.clear();
+    lastInbox = "";
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  if (await post("/api/process", {files: picked()})) refresh();
+};
 document.addEventListener("change", (e) => {
   const box = e.target.closest("[data-pick]");
   if (!box) return;

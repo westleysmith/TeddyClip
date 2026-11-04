@@ -375,3 +375,24 @@ def test_restoring_a_renamed_session_rewrites_its_preview(server, cfg, found):
     post(server + "/api/unarchive", {"session": found})
     moved = sessions.load(cfg, f"{found} (2)")
     assert moved["preview"] == str(sessions.session_dir(cfg, f"{found} (2)") / "preview.mp4")
+
+
+def test_a_recording_stays_ready_while_its_preview_is_streaming(server, cfg):
+    import http.client
+    import socket
+
+    f = cfg.paths.inbox / "Game" / "long.mp4"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"\0" * (64 << 20))  # too big to fit in the socket buffers: the server keeps it open
+    old = time.time() - 600
+    os.utime(f, (old, old))
+    host, port = server.split("//")[1].split(":")
+    viewer = http.client.HTTPConnection(host, int(port))
+    viewer.request("GET", "/media/raw/Game/long.mp4", headers={"Range": "bytes=0-"})
+    viewer.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    time.sleep(0.5)  # the server is now part way through sending, with the file open
+    try:
+        rec = json.loads(get(server + "/api/state")[2])["inbox"][0]
+        assert rec["name"] == os.path.join("Game", "long.mp4") and rec["ready"] is True
+    finally:
+        viewer.close()
