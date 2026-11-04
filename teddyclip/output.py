@@ -21,7 +21,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from teddyclip import media
+from teddyclip import media, progress
 from teddyclip.moments import Moment
 
 CLIP_THAT_PREFIX = "Clip that - "
@@ -87,7 +87,11 @@ def write_clips(src: Path, moments: list[Moment], out_dir: Path) -> list[Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     used: set[str] = set()
-    return [media.cut(src, m.start, m.end, out_dir / _unique_name(clip_name(m), used)) for m in kept]
+    clips = []
+    for done, m in enumerate(kept):
+        progress.step(done / len(kept), f"Cutting clip {done + 1} of {len(kept)}")
+        clips.append(media.cut(src, m.start, m.end, out_dir / _unique_name(clip_name(m), used)))
+    return clips
 
 
 # moments.csv

@@ -17,6 +17,7 @@ import unicodedata
 from dataclasses import replace
 from pathlib import Path
 
+from teddyclip import progress
 from teddyclip.media import read_frames
 from teddyclip.moments import Moment
 
@@ -122,6 +123,7 @@ def screen_events(video: Path, moments: list[Moment], lexicon: Lexicon, weight: 
         plan[i] = times
     out = []
     for i, m in enumerate(moments):
+        progress.step(i / len(moments))
         hits: list[str] = []
         for _t, frame in read_frames(video, plan[i]):
             result, _elapsed = ocr(_center(frame))

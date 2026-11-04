@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from teddyclip import progress
 from teddyclip.llm import LLM
 from teddyclip.transcribe import Segment
 
@@ -170,6 +171,7 @@ def sweep(
     step = max(1.0, slice_s - overlap_s)
     start = 0.0
     while start < duration:
+        progress.step(start / duration)
         end = min(start + slice_s, duration)
         lines = "\n".join(
             f"[{s.start:.0f} - {s.end:.0f}] {s.text.strip()}"
@@ -311,7 +313,8 @@ def label(
     they would cut more than half. Without an answer the title is the first
     words of the transcript and the reason is the kind."""
     out = []
-    for m in moments:
+    for done, m in enumerate(moments):
+        progress.step(done / len(moments))
         text = _text(m, segments)
         answer = None
         if llm.enabled:

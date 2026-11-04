@@ -15,6 +15,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from teddyclip import progress
+
 
 @dataclass
 class Word:
@@ -265,6 +267,8 @@ def _run(model, wav: Path, hotwords: list[str] | None, language: str | None = "e
             ],
         ))
         print(f"\r  Transcribed up to {seg.end:7.1f}s", end="", flush=True)
+        if info.duration:
+            progress.step(seg.end / info.duration)
     print()
     return segments
 

@@ -13,13 +13,14 @@ import os
 import re
 import sys
 import threading
+import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-from teddyclip import cli
+from teddyclip import cli, progress
 from teddyclip.config import Config
 
 PAGE = Path(__file__).with_name("ui.html")
@@ -38,6 +39,7 @@ class Job:
         self.failed = False
         self.lines: collections.deque[str] = collections.deque(maxlen=300)
         self._partial = ""
+        self.step, self.fraction, self.started, self.finished = "", 0.0, 0.0, 0.0
 
     def start(self, name: str, work) -> bool:
         with self.lock:
@@ -45,10 +47,12 @@ class Job:
                 return False
             self.name, self.running, self.failed, self._partial = name, True, False, ""
             self.lines.clear()
+            self.step, self.fraction, self.started, self.finished = "Starting", 0.0, time.time(), 0.0
         threading.Thread(target=self._run, args=(work,), daemon=True).start()
         return True
 
     def _run(self, work) -> None:
+        progress.listen(self._progress)
         try:
             with contextlib.redirect_stdout(_Tee(self)):
                 self.failed = bool(work())
@@ -56,8 +60,19 @@ class Job:
             self.write(f"\nSomething went wrong: {e}\n")
             self.failed = True
         finally:
+            progress.listen(None)
             self.write("\n")
+            with self.lock:
+                self.finished = time.time()
+                if not self.failed:
+                    self.fraction = 1.0
             self.running = False
+
+    def _progress(self, step: str, fraction: float) -> None:
+        with self.lock:
+            if step:
+                self.step = step
+            self.fraction = max(self.fraction, fraction)  # the bar never jumps backwards
 
     def write(self, text: str) -> None:
         with self.lock:
@@ -68,7 +83,10 @@ class Job:
     def state(self) -> dict:
         with self.lock:
             lines = list(self.lines) + ([self._partial] if self._partial.strip() else [])
-        return {"name": self.name, "running": self.running, "failed": self.failed, "lines": lines[-80:]}
+            elapsed = ((self.finished or time.time()) - self.started) if self.started else 0.0
+            step, fraction = self.step, self.fraction
+        return {"name": self.name, "running": self.running, "failed": self.failed, "lines": lines[-80:],
+                "step": step, "fraction": round(fraction, 4), "elapsed": round(elapsed, 1)}
 
 
 class _Tee:

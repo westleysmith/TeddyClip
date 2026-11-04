@@ -14,6 +14,7 @@ import numpy as np
 import requests
 import yaml
 
+from teddyclip import progress
 from teddyclip.config import Config, load_config
 from teddyclip.detectors import Lexicon, game_profile, screen_events
 from teddyclip.llm import LLM
@@ -187,20 +188,25 @@ def process_recording(path: Path, cfg: Config) -> Path:
             "Check OBS Settings > Output > Recording > Audio Track, then record again."
         )
     cache = paths.cache / f"{path.name}-{stat.st_size}-{int(stat.st_mtime)}"
+    # Shares of the progress bar per stage, sized for transcribing on a CPU.
     print("Extracting audio...")
-    wav16 = extract_audio(path, cache / "audio16k.wav", WHISPER_RATE, cfg.audio_track)
-    wav32 = extract_audio(path, cache / "audio32k.wav", PANNS_RATE, cfg.audio_track)
+    with progress.band(0.00, 0.05, "Extracting audio"):
+        wav16 = extract_audio(path, cache / "audio16k.wav", WHISPER_RATE, cfg.audio_track)
+        wav32 = extract_audio(path, cache / "audio32k.wav", PANNS_RATE, cfg.audio_track)
 
     print("Transcribing...")
-    segments = transcribe(wav16, cache, cfg.whisper_model, hotwords=cfg.triggers,
-                          language=cfg.language, device=cfg.whisper_device)
+    with progress.band(0.05, 0.60, "Transcribing what you said"):
+        segments = transcribe(wav16, cache, cfg.whisper_model, hotwords=cfg.triggers,
+                              language=cfg.language, device=cfg.whisper_device)
     release()  # frees the GPU before Ollama is asked anything
 
     print("Measuring loudness...")
-    features = audio_features(wav16)
-    jumps = voice_jump(features["loudness"])
+    with progress.band(0.60, 0.62, "Measuring loudness"):
+        features = audio_features(wav16)
+        jumps = voice_jump(features["loudness"])
     print("Listening for laughter and shouts...")
-    people = people_sounds(wav32, Tagger(*ensure_assets(paths.models)))
+    with progress.band(0.62, 0.70, "Listening for laughter"):
+        people = people_sounds(wav32, Tagger(*ensure_assets(paths.models)))
     laughter, shout = people["laughter"], people["shout"]
 
     llm = LLM(cfg.llm_url, cfg.llm_model, cache)
@@ -209,7 +215,8 @@ def process_recording(path: Path, cfg: Config) -> Path:
         llm = LLM(cfg.llm_url, "none", cache)
     if llm.enabled:
         print("Looking for jokes in the transcript...")
-    jokes = sweep(segments, llm, load_prompt("sweep"))
+    with progress.band(0.70, 0.78, "Looking for jokes"):
+        jokes = sweep(segments, llm, load_prompt("sweep"))
 
     spike = pct(features["spike"])
     fusing = {"laughter": laughter, "joke_sweep": jokes, "loudness": _highest(spike, pct(shout)), "voice_jump": jumps}
@@ -237,12 +244,14 @@ def process_recording(path: Path, cfg: Config) -> Path:
     terms = cfg.lexicons.get(game_profile(path, paths.inbox, cfg.games))
     if terms and moments:
         print("Reading on-screen text...")
-        moments = screen_events(path, moments, Lexicon(terms), weight=cfg.weights["screen_text"])
+        with progress.band(0.78, 0.83, "Reading on-screen text"):
+            moments = screen_events(path, moments, Lexicon(terms), weight=cfg.weights["screen_text"])
 
     if llm.enabled and moments:
         print("Titling the moments...")
-    moments = snapped(label(moments, segments, llm, load_prompt("label"), cfg.people))
-    moments = rerank(moments, llm, load_prompt("rerank"))
+    with progress.band(0.83, 0.90, "Titling the moments"):
+        moments = snapped(label(moments, segments, llm, load_prompt("label"), cfg.people))
+        moments = rerank(moments, llm, load_prompt("rerank"))
     moments = select(moments, info.duration, cfg.max_clips)
 
     kept = sum(m.keep for m in moments)
@@ -251,16 +260,18 @@ def process_recording(path: Path, cfg: Config) -> Path:
     print(f"Found {_count(len(moments), 'moment')}, cutting {_count(kept, 'clip')}")
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
-        write_clips(path, moments, out_dir)
+        with progress.band(0.90, 0.98, "Cutting clips"):
+            write_clips(path, moments, out_dir)
         write_moments_csv(moments, out_dir / "moments.csv")
         write_resolve_edl(moments, out_dir / "Resolve markers.edl", info.fps, cfg.resolve_timeline_start, name)
 
-        if _in_inbox(path, cfg):
-            print("Moving the original to Done...")
-            archive_original(path, paths.done, moments, name)
-        else:
-            print("Copying the original into Done (it is outside the inbox, so it stays where it is)...")
-            archive_original(path, paths.done, moments, name, keep_source=True)
+        with progress.band(0.98, 1.00, "Filing the original in Done"):
+            if _in_inbox(path, cfg):
+                print("Moving the original to Done...")
+                archive_original(path, paths.done, moments, name)
+            else:
+                print("Copying the original into Done (it is outside the inbox, so it stays where it is)...")
+                archive_original(path, paths.done, moments, name, keep_source=True)
     except BaseException:
         _mark_incomplete(out_dir)
         raise
@@ -313,13 +324,15 @@ def process_inbox(cfg: Config) -> int:
     processed: list[Path] = []
     failed: list[tuple[Path, str]] = []
     waiting: list[Path] = []
-    for path in files:
+    for number, path in enumerate(files):
         if not is_finished(path):
             print(f"Skipping {path.name} for now: it is still being recorded or copied.")
             waiting.append(path)
             continue
         try:
-            processed.append(process_recording(path, cfg))
+            # Each recording takes an equal share of the progress bar.
+            with progress.band(number / len(files), (number + 1) / len(files)):
+                processed.append(process_recording(path, cfg))
         except Exception as e:
             print(f"Could not process {path.name}: {_describe(e)}")
             print("It stays in the inbox, so you can fix the problem and run TeddyClip again.")

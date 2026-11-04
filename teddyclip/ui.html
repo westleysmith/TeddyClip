@@ -40,7 +40,18 @@
   .spinner { width: 16px; height: 16px; border-radius: 50%; animation: spin 1.1s linear infinite;
              background: conic-gradient(var(--orange) 0 25%, var(--mustard) 0 50%, var(--teal) 0 75%, var(--avocado) 0); }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .log { max-height: 220px; overflow: auto; margin: 0; padding: 12px 14px; background: var(--walnut);
+  .prow { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; font-size: 15px; }
+  .prow .spacer { flex: 1; }
+  .prow b { color: var(--orange-dark); font-size: 18px; min-width: 3.2em; text-align: right; }
+  .track { height: 16px; border-radius: 999px; background: var(--card-2); border: 1.5px solid var(--line); overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 999px; transition: width .6s ease;
+          background: repeating-linear-gradient(-45deg, var(--orange) 0 14px, #df7a3f 14px 28px); background-size: 40px 40px; }
+  .fill.moving { animation: stripes 1.2s linear infinite; }
+  .fill.failed { background: var(--plum); }
+  @keyframes stripes { to { background-position: 40px 0; } }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .log { max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 12px 14px; background: var(--walnut);
          border-radius: 12px; font: 12.5px/1.55 Consolas, monospace; color: #f6e7cf; white-space: pre-wrap; }
   .session h2 { margin: 0; font-size: 19px; color: var(--walnut); }
   .session .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -91,7 +102,9 @@
   <section class="panel" id="inbox"></section>
   <section class="panel job" id="job" hidden>
     <h2><span class="spinner" id="spin"></span><span id="job-name"></span></h2>
-    <pre class="log" id="log"></pre>
+    <div class="prow"><span id="pstep"></span><span class="spacer"></span><span class="muted" id="ptime"></span><b id="ppct"></b></div>
+    <div class="track"><div class="fill" id="pfill"></div></div>
+    <details id="details"><summary>Show details</summary><pre class="log" id="log"></pre></details>
   </section>
   <div id="sessions"></div>
 </main>
@@ -128,12 +141,32 @@ function renderInbox(inbox) {
   $("make").title = ready ? "" : "Add a finished recording to the inbox first";
 }
 
+function minutes(seconds) {
+  if (seconds < 60) return "under a minute";
+  const m = Math.round(seconds / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+function timeText(job, f) {
+  if (!job.running) return job.elapsed ? `took ${minutes(job.elapsed)}` : "";
+  // Too early to guess: the first stages are quick, so the estimate would swing wildly.
+  if (f < 0.03 || job.elapsed < 20) return `${minutes(job.elapsed)} so far`;
+  return `about ${minutes(job.elapsed * (1 - f) / f)} left`;
+}
+
 function renderJob(job) {
   const show = job.running || job.lines.length > 0;
   $("job").hidden = !show;
   if (!show) return;
   $("spin").style.display = job.running ? "" : "none";
-  $("job-name").textContent = job.running ? job.name + "..." : job.name + (job.failed ? ": finished with problems (see below)" : ": done");
+  $("job-name").textContent = job.running ? job.name + "..." : job.name + (job.failed ? ": finished with problems (open Show details)" : ": done");
+  const f = Math.min(1, Math.max(0, job.fraction || 0));
+  $("pfill").style.width = (f * 100).toFixed(1) + "%";
+  $("pfill").className = "fill" + (job.running ? " moving" : "") + (job.failed ? " failed" : "");
+  $("ppct").textContent = Math.floor(f * 100) + "%";
+  $("pstep").textContent = job.running ? (job.step || "Working") : (job.failed ? "Stopped" : "Finished");
+  $("ptime").textContent = timeText(job, f);
+  if (job.failed) $("details").open = true;
   const log = $("log"), atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
   log.textContent = job.lines.join("\n");
   if (atBottom) log.scrollTop = log.scrollHeight;

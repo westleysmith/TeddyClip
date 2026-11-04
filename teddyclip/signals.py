@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from teddyclip import progress
 from teddyclip.panns import GROUPS, SAMPLE_RATE as PANNS_RATE
 from teddyclip.transcribe import Word
 
@@ -309,7 +310,9 @@ def people_sounds(wav32k: Path, tagger) -> dict[str, np.ndarray]:
         for g, ix in index.items():
             heard[g].append(probs[:, ix].max(axis=1) if ix else np.zeros(len(windows)))
 
+    expected = max(1, (Path(wav32k).stat().st_size - 44) // 2 // sr)  # seconds, from the WAV size
     for chunk in _wav32k_chunks(Path(wav32k), PEOPLE_CHUNK_SECONDS):
+        progress.step(s / expected)
         total += chunk.size
         buf = np.concatenate([buf, chunk])
         windows = []
