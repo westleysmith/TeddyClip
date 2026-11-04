@@ -162,6 +162,19 @@ def _plain_name(name: object) -> str | None:
     return name
 
 
+def _raw_file(cfg: Config, name: str) -> Path | None:
+    """A recording in Raw recordings named the way the page lists it
+    ("Game/file.mp4", with either slash, or "file.mp4"), or None for anything else."""
+    parts = [p for p in re.split(r"[\\/]", name) if p]
+    if not 1 <= len(parts) <= 2 or any(_plain_name(p) is None for p in parts):
+        return None
+    path = cfg.paths.inbox.joinpath(*parts).resolve()
+    inbox = cfg.paths.inbox.resolve()
+    if not path.is_relative_to(inbox) or not path.is_file() or path.suffix.lower() not in cli.VIDEO_SUFFIXES:
+        return None
+    return path
+
+
 def _media_url(kind: str, *parts: str) -> str:
     return "/media/" + kind + "/" + "/".join(quote(p) for p in parts)
 
@@ -261,7 +274,9 @@ def state(cfg: Config, job: Job) -> dict:
     if paths.inbox.is_dir():
         for p in sorted(paths.inbox.rglob("*")):
             if p.is_file() and p.suffix.lower() in cli.VIDEO_SUFFIXES:
-                inbox.append({"name": str(p.relative_to(paths.inbox)), "ready": cli.is_finished(p)})
+                rel = p.relative_to(paths.inbox)
+                inbox.append({"name": str(rel), "ready": cli.is_finished(p),
+                              "size": p.stat().st_size, "url": _media_url("raw", *rel.parts)})
     sessions = []
     if paths.clips.is_dir():
         folders = [d for d in paths.clips.iterdir() if d.is_dir() and d.name != ARCHIVE]
@@ -350,7 +365,9 @@ def make_handler(cfg: Config, job: Job):
             names = [_plain_name(p) for p in parts]
             if not names or None in names:
                 return self._error(HTTPStatus.NOT_FOUND, "not found")
-            if parts[0] == "clips" and len(names) == 3:
+            if parts[0] == "raw" and len(names) in (2, 3):
+                file = cfg.paths.inbox.joinpath(*names[1:])
+            elif parts[0] == "clips" and len(names) == 3:
                 file = cfg.paths.clips / names[1] / names[2]
             elif parts[0] == "highlights" and len(names) == 2:
                 file = cfg.paths.highlights / names[1]
@@ -425,7 +442,16 @@ def make_handler(cfg: Config, job: Job):
                     return self._error(HTTPStatus.CONFLICT, "TeddyClip is busy; try again when it is done")
                 return self._json({"ok": True})
             if path == "/api/process":
-                if not job.start("Making clips", lambda: cli.process_inbox(cfg)):
+                only = data.get("files")
+                if only is not None:
+                    # Names as the page lists them ("Game/file.mp4" or "file.mp4"),
+                    # and only ever inside Raw recordings.
+                    inbox = cfg.paths.inbox.resolve()
+                    if (not isinstance(only, list) or not only
+                            or not all(isinstance(n, str) and _raw_file(cfg, n) for n in only)):
+                        return self._error(HTTPStatus.BAD_REQUEST, "pick recordings from Raw recordings")
+                    only = [str(_raw_file(cfg, n).relative_to(inbox)) for n in only]
+                if not job.start("Making clips", lambda: cli.process_inbox(cfg, only)):
                     return self._error(HTTPStatus.CONFLICT, "TeddyClip is already busy")
                 return self._json({"ok": True})
             if path == "/api/highlight":

@@ -1,7 +1,9 @@
+import os
 import pytest
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 from conftest import stage_in_inbox
 
@@ -277,3 +279,16 @@ def test_inbox_skips_an_mkv_that_obs_already_remuxed_to_mp4(cfg, monkeypatch, ca
 @pytest.mark.parametrize("seconds,expected", [(600, 3), (3600, 15), (4 * 3600, 40), (30, 3)])
 def test_clip_limit_scales_with_length(cfg, seconds, expected):
     assert cli.clip_limit(seconds, cfg) == expected
+
+
+def test_process_inbox_can_take_just_some_recordings(cfg, monkeypatch):
+    for rel in ("A/one.mp4", "B/two.mp4"):
+        f = cfg.paths.inbox / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x")
+        old = time.time() - 600
+        os.utime(f, (old, old))
+    done = []
+    monkeypatch.setattr(cli, "process_recording", lambda p, c: done.append(p.name) or p)
+    assert cli.process_inbox(cfg, only=[str(Path("B") / "two.mp4")]) == 0
+    assert done == ["two.mp4"]

@@ -324,13 +324,17 @@ def _summary(why: str) -> str:
     return lines[0] if lines else why
 
 
-def process_inbox(cfg: Config) -> int:
-    """Process every finished .mp4 and .mkv under the inbox, one at a time. A
-    recording that fails stays in the inbox and the rest carry on. Returns the
-    number of failures."""
+def process_inbox(cfg: Config, only: list[str] | None = None) -> int:
+    """Process every finished .mp4 and .mkv under the inbox, one at a time, or
+    just the ones named in `only` (paths relative to the inbox, as the window
+    lists them). A recording that fails stays in the inbox and the rest carry
+    on. Returns the number of failures."""
     cfg.paths.ensure()
     inbox = cfg.paths.inbox
     files = sorted(p for p in inbox.rglob("*") if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES)
+    if only is not None:
+        chosen = {Path(name) for name in only}
+        files = [p for p in files if p.relative_to(inbox) in chosen]
     if not files:
         print(f"Nothing to do: there are no recordings in {inbox}")
         return 0

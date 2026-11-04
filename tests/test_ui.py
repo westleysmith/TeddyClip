@@ -94,7 +94,7 @@ def test_delete_rejects_anything_but_a_clip_name(server, body):
 
 
 def test_make_clips_runs_in_the_background_and_shows_its_output(server, monkeypatch):
-    def fake(cfg):
+    def fake(cfg, only=None):
         print("Transcribing...")
         print("Done: 1 processed, 0 failed")
         return 0
@@ -110,7 +110,7 @@ def test_make_clips_runs_in_the_background_and_shows_its_output(server, monkeypa
 
 def test_only_one_job_at_a_time(server, session, monkeypatch):
     gate = threading.Event()
-    monkeypatch.setattr(cli, "process_inbox", lambda cfg: gate.wait(5) and 0)
+    monkeypatch.setattr(cli, "process_inbox", lambda cfg, only=None: gate.wait(5) and 0)
     assert post(server + "/api/process", {})[0] == 200
     assert post(server + "/api/highlight", {"session": session.name})[0] == 409
     gate.set()
@@ -225,3 +225,34 @@ def test_restoring_next_to_a_newer_session_of_the_same_name_keeps_both(server, c
 @pytest.mark.parametrize("body", [{"session": "Archived"}, {"session": ".."}, {"session": "missing"}, {}])
 def test_archive_rejects_bad_names(server, body):
     assert post(server + "/api/archive", body)[0] in (400, 404)
+
+
+def test_make_clips_for_just_the_ticked_recordings(server, cfg, monkeypatch):
+    for rel in ("Lego Star Wars/a.mp4", "Worms/b.mp4"):
+        f = cfg.paths.inbox / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x")
+    seen = {}
+    monkeypatch.setattr(cli, "process_inbox", lambda c, only=None: seen.update(only=only) or 0)
+    # The page lists names with Windows backslashes.
+    assert post(server + "/api/process", {"files": [r"Lego Star Wars\a.mp4"]})[0] == 200
+    for _ in range(100):
+        if "only" in seen:
+            break
+        time.sleep(0.02)
+    assert [s.replace("\\", "/") for s in seen["only"]] == ["Lego Star Wars/a.mp4"]
+
+
+@pytest.mark.parametrize("files", [[], [r"..\..\Windows\win.ini"], ["../../x.mp4"], ["missing.mp4"], [5], "a.mp4"])
+def test_make_clips_rejects_anything_outside_raw_recordings(server, files):
+    assert post(server + "/api/process", {"files": files})[0] == 400
+
+
+def test_raw_recordings_can_be_previewed(server, cfg):
+    f = cfg.paths.inbox / "Lego Star Wars" / "session.mp4"
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"0123456789")
+    rec = json.loads(get(server + "/api/state")[2])["inbox"][0]
+    assert rec["size"] == 10 and rec["url"] == "/media/raw/Lego%20Star%20Wars/session.mp4"
+    status, headers, body = get(server + rec["url"], {"Range": "bytes=0-3"})
+    assert status == 206 and body == b"0123"

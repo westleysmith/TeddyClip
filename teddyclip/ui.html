@@ -20,6 +20,14 @@
   .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
   .brand h1 { margin: 0; font-size: 28px; line-height: 1; font-weight: 700; letter-spacing: 1px; color: var(--walnut); text-transform: lowercase; }
   main { max-width: 1280px; margin: 0 auto; padding: 22px 24px 20px; }
+  .raw-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 0; border-top: 1px solid var(--line); }
+  .raw-row:first-of-type { margin-top: 10px; }
+  .raw-row .spacer { flex: 1; }
+  .raw-pick { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+  .raw-pick input { width: 18px; height: 18px; accent-color: var(--orange); cursor: pointer; flex: none; }
+  .raw-pick input:disabled { cursor: default; }
+  .raw-video { width: 100%; max-width: 760px; aspect-ratio: 16 / 9; background: #1f1712; border-radius: 14px;
+               display: block; margin: 4px 0 12px 28px; }
   .auto-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px;
               border-top: 1px dashed var(--line); }
   .auto-row .spacer { flex: 1; }
@@ -223,18 +231,55 @@ function renderAuto(st) {
   $("games-list").innerHTML = games.map((g) => `<option value="${esc(g)}"></option>`).join("");
 }
 
+// Which raw recordings are ticked for Make clips, and which have their preview open.
+// New recordings start ticked once they are finished.
+const chosen = new Set(), openPreview = new Set(), wasReady = new Map();
+let lastInbox = "", rawReady = [];
+
+function size(bytes) {
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+}
+
 function renderInbox(inbox) {
-  const ready = inbox.filter((f) => f.ready).length;
-  let html;
-  if (!inbox.length) {
-    html = `<div class="row"><b>No raw recordings waiting.</b><span class="muted">Click <i>Add recordings</i> and pick a session, then click <i>Make clips</i>.</span></div>`;
-  } else {
-    html = `<b>${inbox.length} raw recording${inbox.length === 1 ? "" : "s"} waiting</b>` +
-      `<ul class="inbox-list">${inbox.map((f) => `<li>${esc(f.name)}${f.ready ? "" : ' <span class="muted">(still being recorded or copied)</span>'}</li>`).join("")}</ul>`;
+  const names = new Set(inbox.map((f) => f.name));
+  for (const f of inbox) {
+    if (f.ready && !wasReady.get(f.name)) chosen.add(f.name);
+    wasReady.set(f.name, f.ready);
   }
-  $("inbox-list").innerHTML = html;
-  $("make").disabled = busy || ready === 0;
-  $("make").title = ready ? "" : "Add a recording first";
+  for (const n of [...chosen]) if (!names.has(n)) chosen.delete(n);
+  for (const n of [...wasReady.keys()]) if (!names.has(n)) { wasReady.delete(n); openPreview.delete(n); }
+  rawReady = inbox.filter((f) => f.ready).map((f) => f.name);
+
+  const key = JSON.stringify([inbox.map((f) => [f.name, f.ready]), [...openPreview]]);
+  if (key !== lastInbox) {  // re-drawing would restart a preview that is playing
+    lastInbox = key;
+    if (!inbox.length) {
+      $("inbox-list").innerHTML = `<div class="row"><b>No raw recordings waiting.</b><span class="muted">Click <i>Add recordings</i> and pick a session, then click <i>Make clips</i>.</span></div>`;
+    } else {
+      $("inbox-list").innerHTML =
+        `<div class="row"><b>${inbox.length} raw recording${inbox.length === 1 ? "" : "s"}</b>` +
+        `<span class="muted">Tick the ones to make clips from. Preview to skim a session first.</span></div>` +
+        inbox.map((f) => `
+          <div class="raw-row">
+            <label class="raw-pick"><input type="checkbox" data-pick="${esc(f.name)}" ${chosen.has(f.name) ? "checked" : ""} ${f.ready ? "" : "disabled"}>
+              <span>${esc(f.name)}</span></label>
+            <span class="muted">${size(f.size)}${f.ready ? "" : ", still being recorded or copied"}</span>
+            <span class="spacer"></span>
+            <button class="small" data-preview="${esc(f.name)}">${openPreview.has(f.name) ? "Hide preview" : "Preview"}</button>
+          </div>
+          ${openPreview.has(f.name) ? `<video class="raw-video" src="${f.url}" controls preload="metadata"></video>` : ""}`).join("");
+    }
+  }
+  updateMake();
+}
+
+function picked() { return rawReady.filter((n) => chosen.has(n)); }
+
+function updateMake() {
+  const n = picked().length;
+  $("make").textContent = n ? `Make clips (${n})` : "Make clips";
+  $("make").disabled = busy || n === 0;
+  $("make").title = n ? "" : (rawReady.length ? "Tick a recording first" : "Add a recording first");
 }
 
 function minutes(seconds) {
@@ -395,7 +440,13 @@ $("add").onclick = async () => {
   if (game === null) return;
   if (await post("/api/add", {files, game})) refresh();
 };
-$("make").onclick = async () => { if (await post("/api/process")) refresh(); };
+$("make").onclick = async () => { if (await post("/api/process", {files: picked()})) refresh(); };
+document.addEventListener("change", (e) => {
+  const box = e.target.closest("[data-pick]");
+  if (!box) return;
+  if (box.checked) chosen.add(box.dataset.pick); else chosen.delete(box.dataset.pick);
+  updateMake();
+});
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -405,6 +456,10 @@ document.addEventListener("click", async (e) => {
     if (await post("/api/delete", {session: b.dataset.session, file: b.dataset.delete})) { lastSessions = ""; refresh(); }
   } else if (b.dataset.highlight) {
     if (await post("/api/highlight", {session: b.dataset.highlight})) refresh();
+  } else if (b.dataset.preview) {
+    const n = b.dataset.preview;
+    if (openPreview.has(n)) openPreview.delete(n); else openPreview.add(n);
+    refresh();
   } else if (b.dataset.archive) {
     if (await post("/api/archive", {session: b.dataset.archive})) { lastSessions = ""; lastShelf = ""; refresh(); }
   } else if (b.dataset.restore) {
