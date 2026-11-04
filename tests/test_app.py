@@ -117,7 +117,16 @@ def test_pick_recordings_opens_the_file_picker_at_videos(monkeypatch, tmp_path):
     monkeypatch.setattr(app.Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / "Videos").mkdir()
     api = app.Api()
-    api.window = Window()
+    api._window = Window()
     assert api.pick_recordings() == [r"C:\Videos\a.mp4"]
     assert asked["directory"] == str(tmp_path / "Videos") and asked["multiple"]
     assert "*.mp4" in asked["types"][0]
+
+
+def test_the_page_only_sees_the_api_methods():
+    # pywebview gives the page every public attribute and walks into each one;
+    # anything else public (like the window) froze TeddyClip.
+    api = app.Api()
+    api._window = object()
+    public = [n for n in dir(api) if not n.startswith("_")]
+    assert public == ["pick_recordings"]

@@ -63,10 +63,16 @@ def _set_window_icon(window) -> None:
 
 
 class Api:
-    """What the page can ask the window for (window.pywebview.api in the page)."""
+    """What the page can ask the window for (window.pywebview.api in the page).
+
+    pywebview hands every public attribute of this object to the page, walking
+    into each one. The window is kept in `_window` (pywebview skips names that
+    start with an underscore): as a public attribute, pywebview walked into the
+    whole Windows form behind it, whose properties lead back to themselves,
+    and froze the window doing it."""
 
     def __init__(self) -> None:
-        self.window = None
+        self._window = None
 
     def pick_recordings(self) -> list[str]:
         """The Windows file picker, opened at Videos (where OBS records by default)."""
@@ -74,7 +80,7 @@ class Api:
 
         start = Path.home() / "Videos"
         kind = getattr(getattr(webview, "FileDialog", None), "OPEN", None) or webview.OPEN_DIALOG
-        chosen = self.window.create_file_dialog(
+        chosen = self._window.create_file_dialog(
             kind, directory=str(start if start.is_dir() else Path.home()), allow_multiple=True,
             file_types=("Recordings (*.mp4;*.mkv)", "All files (*.*)"))
         return [str(p) for p in chosen or []]
@@ -99,7 +105,7 @@ def main() -> int:
     window = webview.create_window("TeddyClip", f"http://127.0.0.1:{ui.PORT}/",
                                    width=1320, height=900, min_size=(760, 560),
                                    background_color="#F3EAD8", js_api=api)
-    api.window = window
+    api._window = window
     window.events.shown += lambda: _set_window_icon(window)
     try:
         webview.start()
