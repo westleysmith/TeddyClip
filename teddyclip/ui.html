@@ -102,6 +102,13 @@
   .badge { font-size: 11.5px; font-weight: 700; padding: 2px 10px; border-radius: 999px; color: var(--cream);
            letter-spacing: .4px; text-transform: uppercase; }
   .k-trigger, .k-marker { background: var(--orange); } .k-laughter { background: var(--mustard); color: var(--ink); }
+  .suggestions { margin: 0 0 16px; border-top: 1px solid var(--line); }
+  .sugg { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+  .sugg .title { font-weight: 700; overflow-wrap: anywhere; }
+  .sugg .spacer { flex: 1; }
+  .sugg.made .title { color: var(--muted); }
+  .made-tag { font-size: 11.5px; font-weight: 700; color: var(--teal); border: 1.5px solid var(--teal);
+              padding: 1px 9px; border-radius: 999px; }
   .k-joke { background: var(--teal); } .k-game { background: var(--plum); } .k-loud { background: var(--avocado); }
   .highlight { margin-bottom: 16px; max-width: 720px; }
   .empty { text-align: center; padding: 44px 20px; }
@@ -145,7 +152,7 @@
       <h1>teddyclip</h1>
     </div>
     <button id="add">Add recordings</button>
-    <button id="make" class="primary">Make clips</button>
+    <button id="make" class="primary">Find clips</button>
   </div>
   <div class="stripes"></div>
 </header>
@@ -153,11 +160,11 @@
   <section class="panel" id="inbox">
     <div id="inbox-list"></div>
     <div class="auto-row">
-      <label class="switch" title="Make clips by itself whenever OBS finishes a recording">
+      <label class="switch" title="Find clips by itself whenever OBS finishes a recording">
         <input type="checkbox" id="auto"><span class="knob"></span>
       </label>
-      <div class="auto-text"><b>Make clips automatically</b>
-        <div class="muted" id="auto-status">Off. Turn on to clip new recordings as soon as they land in 1 - Raw recordings.</div></div>
+      <div class="auto-text"><b>Find clips automatically</b>
+        <div class="muted" id="auto-status">Off. Turn on to find clips in new recordings as soon as they land in 1 - Raw recordings.</div></div>
       <span class="spacer"></span>
       <div id="auto-game-box" hidden>
         <span class="muted">Game for new recordings</span>
@@ -227,11 +234,11 @@ function renderAuto(st) {
   $("auto-game-box").hidden = !s.auto;
   if (document.activeElement !== game) game.value = s.auto_game || "";
   $("auto-status").textContent = s.auto ? st.auto_status
-    : "Off. Turn on to clip new recordings as soon as they land in 1 - Raw recordings.";
+    : "Off. Turn on to find clips in new recordings as soon as they land in 1 - Raw recordings.";
   $("games-list").innerHTML = games.map((g) => `<option value="${esc(g)}"></option>`).join("");
 }
 
-// Which raw recordings are ticked for Make clips, and which have their preview open.
+// Which raw recordings are ticked for Find clips, and which have their preview open.
 // New recordings start ticked once they are finished.
 const chosen = new Set(), openPreview = new Set(), wasReady = new Map();
 let lastInbox = "", rawReady = [];
@@ -254,11 +261,11 @@ function renderInbox(inbox) {
   if (key !== lastInbox) {  // re-drawing would restart a preview that is playing
     lastInbox = key;
     if (!inbox.length) {
-      $("inbox-list").innerHTML = `<div class="row"><b>No raw recordings waiting.</b><span class="muted">Click <i>Add recordings</i> and pick a session, then click <i>Make clips</i>.</span></div>`;
+      $("inbox-list").innerHTML = `<div class="row"><b>No raw recordings waiting.</b><span class="muted">Click <i>Add recordings</i> and pick a session, then click <i>Find clips</i>.</span></div>`;
     } else {
       $("inbox-list").innerHTML =
         `<div class="row"><b>${inbox.length} raw recording${inbox.length === 1 ? "" : "s"}</b>` +
-        `<span class="muted">Tick the ones to make clips from. Preview to skim a session first.</span></div>` +
+        `<span class="muted">Tick the ones to find clips in. Preview to skim a session first.</span></div>` +
         inbox.map((f) => `
           <div class="raw-row">
             <label class="raw-pick"><input type="checkbox" data-pick="${esc(f.name)}" ${chosen.has(f.name) ? "checked" : ""} ${f.ready ? "" : "disabled"}>
@@ -277,7 +284,7 @@ function picked() { return rawReady.filter((n) => chosen.has(n)); }
 
 function updateMake() {
   const n = picked().length;
-  $("make").textContent = n ? `Make clips (${n})` : "Make clips";
+  $("make").textContent = n ? `Find clips (${n})` : "Find clips";
   $("make").disabled = busy || n === 0;
   $("make").title = n ? "" : (rawReady.length ? "Tick a recording first" : "Add a recording first");
 }
@@ -331,6 +338,7 @@ function clipCard(session, c) {
         <div class="title">${esc(c.title)}</div>
         ${c.why && c.why !== c.kind ? `<div class="why">${esc(c.why)}</div>` : ""}
         <div class="foot">${kind}<span class="muted" title="Where this clip starts in the full recording, and how long the clip is">${clipWhen(c)}</span><span class="spacer"></span>
+          ${c.edit ? `<button class="small" data-edit-session="${esc(session)}" data-edit-clip="${esc(c.file)}">Edit</button>` : ""}
           <button class="small danger" data-delete="${esc(c.file)}" data-title="${esc(c.title)}" data-session="${esc(session)}">Delete</button></div>
       </div></div>`;
 }
@@ -349,12 +357,40 @@ function renderShelf(archived) {
       <button class="small" data-restore="${esc(a.name)}">Restore</button></div>`).join("");
 }
 
+// "clip that" and OBS markers first, then the rest in time order.
+const FIRST = {trigger: 0, marker: 0};
+function suggestionList(s) {
+  if (!s.editable || !s.suggestions.length) return "";
+  const rows = [...s.suggestions].sort((a, b) => ((FIRST[a.kind] ?? 1) - (FIRST[b.kind] ?? 1)) || (a.start - b.start));
+  const left = rows.filter((r) => !r.made).length;
+  return `<div class="muted" style="margin-bottom:6px">${left ? `${left} suggested clip${left === 1 ? "" : "s"} to review` : "Every suggestion has a clip"}.
+      Review one to see what was said around it, move its start and end, and make the clip.</div>
+    <div class="suggestions">${rows.map((r) => `
+      <div class="sugg${r.made ? " made" : ""}">
+        <span class="badge k-${esc(r.kind)}">${esc(KIND[r.kind] || r.kind)}</span>
+        <span class="title">${esc(r.title)}</span>
+        <span class="muted">${clipWhen({start: hms(r.start), length: Math.round(r.end - r.start)})}</span>
+        ${r.made ? '<span class="made-tag">Made</span>' : ""}
+        <span class="spacer"></span>
+        <button class="small${r.made ? "" : " primary"}" data-review-session="${esc(s.name)}" data-review="${r.id}">${r.made ? "Open" : "Review"}</button>
+      </div>`).join("")}</div>`;
+}
+
+function hms(seconds) {
+  const t = Math.max(0, Math.round(seconds)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, sec = t % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+function openEditor(session, extra) {
+  location.href = `/edit?session=${encodeURIComponent(session)}&${extra}`;
+}
+
 function renderSessions(sessions) {
   const key = JSON.stringify(sessions);
   if (key === lastSessions) return;  // re-drawing would restart any video that is playing
   lastSessions = key;
   if (!sessions.length) {
-    $("sessions").innerHTML = `<div class="panel empty muted">No clips yet. Your clips will show up here after <b>Make clips</b>.</div>`;
+    $("sessions").innerHTML = `<div class="panel empty muted">Nothing here yet. Suggested clips show up here after <b>Find clips</b>.</div>`;
     return;
   }
   $("sessions").innerHTML = sessions.map((s) => `
@@ -366,13 +402,14 @@ function renderSessions(sessions) {
         <span class="spacer"></span>
         <button class="small" data-open="clips" data-session="${esc(s.name)}">Open folder</button>
         <button class="small" data-archive="${esc(s.name)}" title="Put this session away. Nothing is deleted.">Archive</button>
-        <button class="small" data-highlight="${esc(s.name)}" ${s.clips.length ? "" : "disabled"}>${s.highlight ? "Remake highlight" : "Make highlight"}</button>
+        <button class="small" data-highlight="${esc(s.name)}" data-empty="${s.clips.length ? 0 : 1}" ${s.clips.length ? "" : "disabled"}>${s.highlight ? "Remake highlight" : "Make highlight"}</button>
       </div>
       ${s.highlight ? `<div class="highlight"><div class="muted" style="margin-bottom:6px">Highlight video
           <button class="small" data-open="highlights">Open folder</button></div>
           <video src="${s.highlight}" controls preload="metadata"></video></div>` : ""}
+      ${suggestionList(s)}
       ${s.clips.length ? `<div class="grid">${s.clips.map((c) => clipCard(s.name, c)).join("")}</div>`
-                       : '<div class="muted">No clips left in this folder.</div>'}
+                       : (s.editable ? "" : '<div class="muted">No clips left in this folder.</div>')}
     </section>`).join("");
 }
 
@@ -459,7 +496,11 @@ document.addEventListener("change", (e) => {
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  if (b.dataset.delete) {
+  if (b.dataset.review) {
+    openEditor(b.dataset.reviewSession, `s=${encodeURIComponent(b.dataset.review)}`);
+  } else if (b.dataset.editClip) {
+    openEditor(b.dataset.editSession, `clip=${encodeURIComponent(b.dataset.editClip)}`);
+  } else if (b.dataset.delete) {
     if (!await ask(`Delete "${b.dataset.title || b.dataset.delete}"?`,
                    "It goes to the Recycle Bin, so you can get it back if you change your mind.")) return;
     if (await post("/api/delete", {session: b.dataset.session, file: b.dataset.delete})) { lastSessions = ""; refresh(); }
