@@ -5,6 +5,7 @@ shortcut points at."""
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -71,19 +72,37 @@ class Api:
     whole Windows form behind it, whose properties lead back to themselves,
     and froze the window doing it."""
 
-    def __init__(self) -> None:
+    def __init__(self, memory: Path | None = None) -> None:
         self._window = None
+        self._memory = memory  # remembers the folder recordings were last added from
+
+    def _start_folder(self) -> Path:
+        """Where the picker opens: the folder recordings were last added from,
+        else Videos (where OBS records by default)."""
+        try:
+            last = Path(json.loads(self._memory.read_text(encoding="utf-8"))["last_folder"])
+            if last.is_dir():
+                return last
+        except (AttributeError, OSError, ValueError, KeyError, TypeError):
+            pass
+        videos = Path.home() / "Videos"
+        return videos if videos.is_dir() else Path.home()
 
     def pick_recordings(self) -> list[str]:
-        """The Windows file picker, opened at Videos (where OBS records by default)."""
+        """The Windows file picker, opened where recordings were last added from."""
         import webview
 
-        start = Path.home() / "Videos"
         kind = getattr(getattr(webview, "FileDialog", None), "OPEN", None) or webview.OPEN_DIALOG
-        chosen = self._window.create_file_dialog(
-            kind, directory=str(start if start.is_dir() else Path.home()), allow_multiple=True,
-            file_types=("Recordings (*.mp4;*.mkv)", "All files (*.*)"))
-        return [str(p) for p in chosen or []]
+        chosen = [str(p) for p in self._window.create_file_dialog(
+            kind, directory=str(self._start_folder()), allow_multiple=True,
+            file_types=("Recordings (*.mp4;*.mkv)", "All files (*.*)")) or []]
+        if chosen and self._memory is not None:
+            try:
+                self._memory.parent.mkdir(parents=True, exist_ok=True)
+                self._memory.write_text(json.dumps({"last_folder": str(Path(chosen[0]).parent)}), encoding="utf-8")
+            except OSError:
+                pass  # only a convenience
+        return chosen
 
 
 def main() -> int:
@@ -101,7 +120,7 @@ def main() -> int:
     if server is not None:
         threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    api = Api()
+    api = Api(cfg.paths.cache / "window.json")
     window = webview.create_window("TeddyClip", f"http://127.0.0.1:{ui.PORT}/",
                                    width=1320, height=900, min_size=(760, 560),
                                    background_color="#F3EAD8", js_api=api)

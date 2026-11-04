@@ -130,3 +130,22 @@ def test_the_page_only_sees_the_api_methods():
     api._window = object()
     public = [n for n in dir(api) if not n.startswith("_")]
     assert public == ["pick_recordings"]
+
+
+def test_picker_remembers_the_last_folder(monkeypatch, tmp_path):
+    asked = []
+    obs = tmp_path / "OBS recordings"
+    obs.mkdir()
+
+    class Window:
+        def create_file_dialog(self, kind, directory="", allow_multiple=False, file_types=()):
+            asked.append(directory)
+            return (str(obs / "session.mp4"),)
+
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(OPEN_DIALOG=10))
+    monkeypatch.setattr(app.Path, "home", staticmethod(lambda: tmp_path))
+    api = app.Api(tmp_path / "cache" / "window.json")
+    api._window = Window()
+    api.pick_recordings()
+    api.pick_recordings()
+    assert asked == [str(tmp_path), str(obs)]  # first time home (no Videos here), then where they picked
