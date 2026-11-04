@@ -9,9 +9,9 @@ from teddyclip import media
 from teddyclip.media import Probe
 from teddyclip.moments import Moment
 from teddyclip.output import (
-    archive_original,
     build_highlight,
     clip_name,
+    file_original,
     write_clips,
     write_moments_csv,
     write_resolve_edl,
@@ -307,76 +307,42 @@ def test_highlight_does_not_rejoin_its_own_output(tmp_path, monkeypatch):
     assert "highlight.mp4" not in joined and len(joined) == 3
 
 
-# archive
+# filing the original
 
 
-def test_archive_keeps_source_on_failure(tiny_video, tmp_path, monkeypatch):
-    monkeypatch.setattr(media, "write_chapters", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
-    with pytest.raises(RuntimeError):
-        archive_original(tiny_video, tmp_path / "Done", [], "x")
-    assert tiny_video.exists() and not (tmp_path / "Done" / "x.mp4").exists()
-
-
-def test_archive_moves_source_into_done_with_chapters(tiny_video, tmp_path):
-    ms = [
-        Moment(2, 5, 9, "trigger", title="Boss", keep=True),
-        Moment(5, 8, 5, "loud", title="Skipped"),
-        Moment(6, 9, 8, "marker", title="Hotkey", keep=True),
-    ]
+def test_an_inbox_mp4_is_moved_into_finished_as_it_is(tiny_video, tmp_path):
+    data = tiny_video.read_bytes()
     done = tmp_path / "Done"
-    dst = archive_original(tiny_video, done, ms, "session")
-    assert dst == done / "session.mp4" and dst.is_file()
-    assert not tiny_video.exists()
-    info = media.probe(dst)
-    assert abs(info.duration - 10) < 0.5
-    assert [c.title for c in info.chapters] == ["Start", "Boss", "Hotkey"]
-    assert [round(c.start, 2) for c in info.chapters] == [0, 2, 6]
+    dst = file_original(tiny_video, done, "session", in_inbox=True)
+    assert dst == done / "session.mp4" and dst.read_bytes() == data and not tiny_video.exists()
 
 
-def test_archive_can_keep_the_source(tiny_video, tmp_path):
-    ms = [Moment(2, 5, 9, "trigger", title="Boss", keep=True)]
-    dst = archive_original(tiny_video, tmp_path / "Done", ms, "session", keep_source=True)
-    assert tiny_video.exists() and dst.is_file()
-    assert [c.title for c in media.probe(dst).chapters] == ["Start", "Boss"]
-
-
-def test_archive_adds_no_start_chapter_when_first_moment_starts_at_zero(tiny_video, tmp_path):
-    ms = [Moment(0, 3, 9, "trigger", title="Boss", keep=True), Moment(6, 9, 8, "marker", title="Hotkey", keep=True)]
-    dst = archive_original(tiny_video, tmp_path / "Done", ms, "session")
-    info = media.probe(dst)
-    assert [c.title for c in info.chapters] == ["Boss", "Hotkey"]
-    assert [round(c.start, 2) for c in info.chapters] == [0, 6]
-
-
-def test_archive_keeps_the_source_container_extension(tiny_video, tmp_path):
+def test_an_inbox_mkv_becomes_an_mp4_the_window_can_play(tiny_video, tmp_path):
     mkv = tmp_path / "rec.mkv"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tiny_video), "-c", "copy", str(mkv)], check=True)
-    ms = [Moment(2, 5, 9, "trigger", title="Boss", keep=True)]
+    dst = file_original(mkv, tmp_path / "Done", "session", in_inbox=True)
+    assert dst == tmp_path / "Done" / "session.mp4" and media.window_playable(dst)
+    assert abs(media.probe(dst).duration - 10) < 0.5 and not mkv.exists()
+
+
+def test_a_recording_from_outside_the_inbox_stays_where_it_is(tiny_video, tmp_path):
     done = tmp_path / "Done"
-    dst = archive_original(mkv, done, ms, "session")
-    assert dst == done / "session.mkv" and dst.suffix == ".mkv" and dst.is_file()
-    assert not mkv.exists()
-    assert [c.title for c in media.probe(dst).chapters] == ["Start", "Boss"]
+    assert file_original(tiny_video, done, "session", in_inbox=False) == tiny_video
+    assert tiny_video.exists() and not done.exists()
 
 
-def test_archive_refuses_to_overwrite(tiny_video, tmp_path):
+def test_filing_refuses_to_overwrite(tiny_video, tmp_path):
     done = tmp_path / "Done"; done.mkdir()
     existing = done / "x.mp4"; existing.write_bytes(b"precious")
     with pytest.raises(FileExistsError, match="x.mp4"):
-        archive_original(tiny_video, done, [], "x")
+        file_original(tiny_video, done, "x", in_inbox=True)
     assert existing.read_bytes() == b"precious" and tiny_video.exists()
 
 
-def test_archive_removes_partial_and_keeps_source_when_duration_differs(tiny_video, tmp_path, monkeypatch):
-    def short_copy(src, dst, chapters):
-        return media.cut(src, 0, 5, dst)
-
-    monkeypatch.setattr(media, "write_chapters", short_copy)
+def test_a_short_remux_keeps_the_mkv_and_leaves_nothing(tiny_video, tmp_path, monkeypatch):
+    mkv = tmp_path / "rec.mkv"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tiny_video), "-c", "copy", str(mkv)], check=True)
+    monkeypatch.setattr(media, "remux_to_mp4", lambda src, dst: media.cut(src, 0, 5, dst))
     with pytest.raises(RuntimeError, match="duration"):
-        archive_original(tiny_video, tmp_path / "Done", [], "x")
-    assert tiny_video.exists() and not (tmp_path / "Done" / "x.mp4").exists()
-
-
-def test_archive_with_no_kept_moments_still_archives(tiny_video, tmp_path):
-    dst = archive_original(tiny_video, tmp_path / "Done", [Moment(0, 30, 5, "loud")], "x")
-    assert dst.is_file() and not tiny_video.exists() and media.probe(dst).chapters == []
+        file_original(mkv, tmp_path / "Done", "x", in_inbox=True)
+    assert mkv.exists() and not (tmp_path / "Done" / "x.mp4").exists()

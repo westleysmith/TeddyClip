@@ -1,13 +1,13 @@
 # Adapted from Clips Kitty (https://github.com/ColinGPT9/clips-studio), AGPL-3.0-or-later, Copyright (C) 2026 ColinGPT9. Modified for TeddyClip.
 """Everything a finished recording leaves behind: the clips, moments.csv, a
 DaVinci Resolve marker EDL, YouTube chapters, the highlight video, and the
-original moved into Done with chapter markers.
+original filed in Finished recordings.
 
 The chapter rules and the `_timestamp` helper come from Clips Kitty's
 longform/chapters.py. The highlight join flow is a trimmed version of its
 longform/assemble.py: clips are already encoded identically by `media.cut`, so
 they are joined losslessly (no outro card, progress callback or cancel hook).
-Clip naming, the CSV, the EDL and the archive step are TeddyClip's own.
+Clip naming, the CSV, the EDL and filing the original are TeddyClip's own.
 
 Every ffmpeg call goes through the `media` module (called as `media.cut`, etc.).
 These functions take plain data and never decide what to keep: a moment is
@@ -17,7 +17,9 @@ output only when its `keep` flag is set.
 from __future__ import annotations
 
 import csv
+import os
 import re
+import shutil
 import unicodedata
 from pathlib import Path
 
@@ -272,32 +274,35 @@ def build_highlight(clip_dir: Path, video_out: Path, chapters_out: Path) -> Path
 # archive
 
 
-def archive_original(src: Path, done_dir: Path, moments: list[Moment], name: str,
-                     keep_source: bool = False) -> Path:
-    """Remux `src` into `done_dir/<name><src extension>` with the kept moments as
-    chapters, check the copy is as long as the original, then delete `src`
-    (unless `keep_source`). On any failure the partial output is removed and
-    `src` is left alone."""
+def file_original(src: Path, done_dir: Path, name: str, in_inbox: bool) -> Path:
+    """Put the analyzed recording where the editor plays it from, and return
+    that path. From the inbox it moves to `done_dir/<name>.<ext>` unchanged;
+    an MKV becomes an MP4 instead (no re-encode), because the app window
+    cannot play MKV, and is deleted only once the copy is as long as the
+    original. A recording from anywhere else stays where it is."""
     src, done_dir = Path(src), Path(done_dir)
-    dst = done_dir / f"{name}{src.suffix or '.mp4'}"
+    if not in_inbox:
+        return src
+    mkv = src.suffix.lower() == ".mkv"
+    dst = done_dir / f"{name}{'.mp4' if mkv else (src.suffix or '.mp4')}"
     if dst.exists():
         raise FileExistsError(f"{dst} already exists, so the original was not moved. Rename or remove it and try again.")
     done_dir.mkdir(parents=True, exist_ok=True)
-    kept = _kept(moments)
-    chapters = [media.Chapter(m.start, m.end, " ".join(m.title.split()) or "moment") for m in kept]
-    if kept and kept[0].start > 1.0:
-        # The mov muxer makes chapters gapless, so without this the first moment's chapter would start at 0.
-        chapters.insert(0, media.Chapter(0, kept[0].start, "Start"))
+    if not mkv:
+        try:
+            os.replace(src, dst)
+        except OSError:  # another drive
+            shutil.move(str(src), str(dst))
+        return dst
     try:
-        media.write_chapters(src, dst, chapters)
+        media.remux_to_mp4(src, dst)
         want, got = media.probe(src).duration, media.probe(dst).duration
         if abs(got - want) > ARCHIVE_TOLERANCE_SECONDS:
             raise RuntimeError(
-                f"The archived copy's duration ({got:.1f} s) does not match the original ({want:.1f} s), "
+                f"The MP4 copy's duration ({got:.1f} s) does not match the original ({want:.1f} s), "
                 "so the original was kept."
             )
-        if not keep_source:
-            src.unlink()
+        src.unlink()
     except BaseException:
         dst.unlink(missing_ok=True)
         raise
