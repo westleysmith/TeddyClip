@@ -1,0 +1,56 @@
+# Builds whisper.cpp with Vulkan, so TeddyClip can transcribe on AMD and Intel
+# graphics cards (and NVIDIA, though TeddyClip prefers faster-whisper there).
+# whisper.cpp's own Windows releases have CPU and CUDA builds but no Vulkan one.
+# The zip is attached to a TeddyClip release, where the installer downloads it.
+name: Build whisper.cpp for Vulkan
+
+on:
+  workflow_dispatch:
+    inputs:
+      whisper_version:
+        description: whisper.cpp tag to build
+        default: v1.9.5
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Install the Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1.7.0
+        with:
+          cache: true
+
+      - name: Get whisper.cpp ${{ inputs.whisper_version }}
+        run: git clone --depth 1 --branch ${{ inputs.whisper_version }} https://github.com/ggml-org/whisper.cpp src
+
+      - name: Build
+        run: |
+          cmake -S src -B build -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=ON -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel 4 --target whisper-cli
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "whisper-vulkan-win-x64"
+          New-Item -ItemType Directory $out | Out-Null
+          Get-ChildItem build -Recurse -Include whisper-cli.exe, *.dll | Copy-Item -Destination $out
+          Copy-Item src/LICENSE "$out/LICENSE-whisper.cpp.txt"
+          Get-ChildItem $out | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+          if (-not (Test-Path "$out/whisper-cli.exe")) { throw "whisper-cli.exe was not built" }
+          Compress-Archive "$out/*" "$out.zip"
+
+      - name: Attach to a TeddyClip release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "whisper-vulkan-${{ inputs.whisper_version }}"
+          gh release view $tag --repo ${{ github.repository }} *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo ${{ github.repository }} --title "whisper.cpp ${{ inputs.whisper_version }} for Vulkan" --notes "whisper.cpp ${{ inputs.whisper_version }} (MIT, https://github.com/ggml-org/whisper.cpp) built with Vulkan by this repository's workflow, for TeddyClip's installer." --latest=false
+          }
+          gh release upload $tag whisper-vulkan-win-x64.zip --clobber --repo ${{ github.repository }}
