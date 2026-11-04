@@ -1,5 +1,5 @@
-"""A small local web page for TeddyClip: make clips, watch and delete them, and
-make highlight videos. It only listens on 127.0.0.1, so nothing outside this PC
+"""A small local web page for TeddyClip: find clips, review them in the editor,
+watch and delete them, and make highlight videos. It only listens on 127.0.0.1, so nothing outside this PC
 can reach it, and it uses Python's built-in web server."""
 
 from __future__ import annotations
@@ -20,10 +20,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-from teddyclip import cli, progress
+from teddyclip import cli, editing, progress, session
 from teddyclip.config import Config
 
 PAGE = Path(__file__).with_name("ui.html")
+EDITOR = Path(__file__).with_name("editor.html")
 ARCHIVE = "Archived"  # inside 2 - Clips: sessions put away from the main list
 PORT = 8765
 CHUNK = 1 << 20
@@ -275,7 +276,7 @@ def add_recordings(files: list[Path], game: str | None, cfg: Config) -> int:
             except OSError as e:
                 print(f"Could not add {src.name}: {e}")
                 failed += 1
-    print("Added. Click Make clips when you are ready." if not failed else "Some recordings could not be added.")
+    print("Added. Click Find clips when you are ready." if not failed else "Some recordings could not be added.")
     return failed
 
 
@@ -304,18 +305,23 @@ def state(cfg: Config, job: Job) -> dict:
         folders = [d for d in paths.clips.iterdir() if d.is_dir() and d.name != ARCHIVE]
         for folder in sorted(folders, key=lambda d: d.stat().st_mtime, reverse=True):
             notes = _clip_notes(cfg, folder)
+            found = session.load(cfg, folder.name)
+            made = _made_rows(found) if found else {}
             clips = []
             for clip in sorted(folder.glob("*.mp4"), key=lambda p: p.name):
-                row = notes.get(clip.name, {})
+                row = made.get(clip.name) or notes.get(clip.name, {})
                 title = row.get("title") or clip.stem.split(" - ", 1)[-1]
                 start, end = _seconds(row.get("start")), _seconds(row.get("end"))
                 clips.append({"file": clip.name, "title": title, "why": row.get("why", ""),
                               "kind": row.get("kind", ""), "start": row.get("start", ""),
                               "length": round(end - start) if start is not None and end is not None else None,
                               "events": [e.strip() for e in row.get("events", "").split(";") if e.strip()],
-                              "url": _versioned(_media_url("clips", folder.name, clip.name), clip)})
+                              "url": _versioned(_media_url("clips", folder.name, clip.name), clip),
+                              "edit": clip.name in made})
             highlight = paths.highlights / f"{folder.name}.mp4"
             sessions.append({"name": folder.name, "clips": clips,
+                             "editable": found is not None,
+                             "suggestions": _suggestion_rows(found, folder) if found else [],
                              "incomplete": "(incomplete" in folder.name,
                              "highlight": _versioned(_media_url("highlights", highlight.name), highlight)
                              if highlight.is_file() else None})
@@ -328,6 +334,33 @@ def state(cfg: Config, job: Job) -> dict:
     return {"inbox": inbox, "sessions": sessions, "archived": archived,
             "games": _games(cfg, sessions + archived), "job": job.state(),
             "settings": settings, "auto_status": auto_status(cfg, job, settings)}
+
+
+def _clock(seconds: float) -> str:
+    """103.4 -> "0:01:43", the way moments.csv writes times."""
+    hours, rest = divmod(max(0, round(seconds)), 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}"
+
+
+def _made_rows(found: dict) -> dict[str, dict]:
+    """Clips made in the editor, keyed by file, shaped like moments.csv rows."""
+    kinds = {s["id"]: s for s in found.get("suggestions", [])}
+    rows = {}
+    for m in found.get("made", []):
+        picked = kinds.get(m.get("suggestion"), {})
+        rows[m["file"]] = {"title": m.get("title", ""), "start": _clock(m["start"]), "end": _clock(m["end"]),
+                           "kind": picked.get("kind", ""), "why": picked.get("why", ""),
+                           "events": ";".join(picked.get("events", []))}
+    return rows
+
+
+def _suggestion_rows(found: dict, folder: Path) -> list[dict]:
+    """A session's suggestions for the main screen, each marked made when a
+    clip made from it is still in the clip folder."""
+    done = {m.get("suggestion") for m in found.get("made", []) if (folder / m["file"]).is_file()}
+    return [{"id": s["id"], "start": s["start"], "end": s["end"], "kind": s["kind"], "title": s["title"],
+             "made": s["id"] in done} for s in found.get("suggestions", [])]
 
 
 def _free_dir(path: Path) -> Path:
@@ -348,6 +381,13 @@ def archive_session(cfg: Config, name: str, back: bool = False) -> Path:
     dst = _free_dir((cfg.paths.clips if back else shelf) / name)
     dst.parent.mkdir(parents=True, exist_ok=True)
     src.rename(dst)
+    if dst.name != name:  # restored next to a newer session: its own files follow the new name
+        notes = session.session_dir(cfg, name)
+        if notes.is_dir() and not session.session_dir(cfg, dst.name).exists():
+            notes.rename(session.session_dir(cfg, dst.name))
+            data = session.load(cfg, dst.name)
+            if data is not None:
+                session.save(cfg, {**data, "name": dst.name})
     return dst
 
 
@@ -379,12 +419,36 @@ def make_handler(cfg: Config, job: Job):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif path == "/edit":
+                body = EDITOR.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif path == "/api/state":
                 self._json(state(cfg, job))
+            elif path.startswith("/api/session/"):
+                self._session(path[len("/api/session/"):])
             elif path.startswith("/media/"):
                 self._media(path.split("/")[2:])
             else:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
+
+        def _session(self, raw: str) -> None:
+            name = _plain_name(raw)
+            data = session.load(cfg, name) if name else None
+            if data is None:
+                return self._error(HTTPStatus.NOT_FOUND, "no such session")
+            folder = cfg.paths.clips / name
+            for m in data.get("made", []):
+                clip = folder / m["file"]
+                m["exists"] = clip.is_file()
+                m["url"] = _versioned(_media_url("clips", name, m["file"]), clip)
+            playing = Path(data.get("preview") or data.get("recording") or "")
+            data["recording_url"] = _media_url("recording", name)
+            data["recording_ok"] = playing.is_file()
+            self._json(data)
 
         def _media(self, parts: list[str]) -> None:
             names = [_plain_name(p) for p in parts]
@@ -396,6 +460,10 @@ def make_handler(cfg: Config, job: Job):
                 file = cfg.paths.clips / names[1] / names[2]
             elif parts[0] == "highlights" and len(names) == 2:
                 file = cfg.paths.highlights / names[1]
+            elif parts[0] == "recording" and len(names) == 2:
+                # The path comes from the session file, never from the request.
+                data = session.load(cfg, names[1]) or {}
+                file = Path(data.get("preview") or data.get("recording") or cfg.paths.notes / "missing")
             else:
                 return self._error(HTTPStatus.NOT_FOUND, "not found")
             if not file.is_file():
@@ -476,9 +544,25 @@ def make_handler(cfg: Config, job: Job):
                             or not all(isinstance(n, str) and _raw_file(cfg, n) for n in only)):
                         return self._error(HTTPStatus.BAD_REQUEST, "pick recordings from Raw recordings")
                     only = [str(_raw_file(cfg, n).relative_to(inbox)) for n in only]
-                if not job.start("Making clips", lambda: cli.process_inbox(cfg, only)):
+                if not job.start("Finding clips", lambda: cli.process_inbox(cfg, only)):
                     return self._error(HTTPStatus.CONFLICT, "TeddyClip is already busy")
                 return self._json({"ok": True})
+            if path == "/api/cut":
+                name = _plain_name(data.get("session"))
+                title, replace, suggestion = data.get("title", ""), data.get("replace"), data.get("suggestion")
+                if name is None or not isinstance(title, str):
+                    return self._error(HTTPStatus.BAD_REQUEST, "That session or title is not valid.")
+                if suggestion is not None and (isinstance(suggestion, bool) or not isinstance(suggestion, int)):
+                    suggestion = None
+                try:
+                    clip = editing.cut_clip(cfg, name, data.get("start"), data.get("end"), title,
+                                            replace=replace, suggestion=suggestion)
+                except editing.CutError as e:
+                    return self._error(HTTPStatus.BAD_REQUEST, str(e))
+                except (OSError, RuntimeError) as e:
+                    return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"The clip could not be made: {e}")
+                return self._json({"file": clip.name,
+                                   "url": _versioned(_media_url("clips", name, clip.name), clip)})
             if path == "/api/highlight":
                 session = _plain_name(data.get("session"))
                 if session is None or not (cfg.paths.clips / session).is_dir():
@@ -624,7 +708,7 @@ def auto_tick(cfg: Config, job: Job) -> str:
             (cfg.paths.inbox / game).mkdir(parents=True, exist_ok=True)
         for p in loose:  # same folder tree, so this is an instant rename
             os.replace(p, _free_name(cfg.paths.inbox / game / p.name))
-    return "started" if job.start("Making clips (automatic)", lambda: cli.process_inbox(cfg)) else "busy"
+    return "started" if job.start("Finding clips (automatic)", lambda: cli.process_inbox(cfg)) else "busy"
 
 
 def _watch(cfg: Config, job: Job) -> None:

@@ -4,6 +4,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 import pytest
 
@@ -265,3 +266,92 @@ def test_raw_recordings_can_be_previewed(server, cfg):
     assert rec["size"] == 10 and rec["url"] == "/media/raw/Lego%20Star%20Wars/session.mp4"
     status, headers, body = get(server + rec["url"], {"Range": "bytes=0-3"})
     assert status == 206 and body == b"0123"
+
+
+# the editor
+
+@pytest.fixture
+def found(cfg, tiny_video):
+    """A session found by the new flow: suggestions saved, nothing cut yet."""
+    import numpy as np
+    from teddyclip import session
+    from teddyclip.moments import Moment
+    from teddyclip.transcribe import Segment
+
+    cfg.paths.ensure()
+    name = "2026-11-04 Lego"
+    recording = cfg.paths.done / f"{name}.mp4"
+    recording.write_bytes(tiny_video.read_bytes())
+    (cfg.paths.clips / name).mkdir(parents=True)
+    session.save(cfg, session.build(name, recording, None, 10.0, [Segment(1.0, 3.0, "game over", [])],
+                                    np.zeros(10), np.zeros(10),
+                                    [Moment(1.0, 4.0, 9, "laughter", title="Game over", keep=True),
+                                     Moment(5.0, 9.0, 10, "trigger", title="Clip it", keep=True)]))
+    return name
+
+
+def test_editor_page_is_served(server):
+    status, headers, body = get(server + "/edit?session=x&s=1")
+    assert status == 200 and b"<html" in body.lower() and headers["Content-Type"].startswith("text/html")
+
+
+def test_session_api_gives_the_session_and_its_links(server, found):
+    status, _, body = get(server + "/api/session/" + quote(found))
+    data = json.loads(body)
+    assert status == 200 and data["name"] == found and len(data["suggestions"]) == 2
+    assert data["recording_url"] == "/media/recording/2026-11-04%20Lego" and data["recording_ok"] is True
+
+
+@pytest.mark.parametrize("name", ["nope", "..", "a%2Fb"])
+def test_session_api_404s_for_anything_else(server, found, name):
+    with pytest.raises(urllib.error.HTTPError) as e:
+        get(server + "/api/session/" + name)
+    assert e.value.code == 404
+
+
+def test_recording_streams_with_ranges_and_404s_once_gone(server, cfg, found):
+    status, headers, body = get(server + "/media/recording/" + quote(found), {"Range": "bytes=0-3"})
+    assert status == 206 and len(body) == 4
+    (cfg.paths.done / f"{found}.mp4").unlink()
+    with pytest.raises(urllib.error.HTTPError) as e:
+        get(server + "/media/recording/" + quote(found))
+    assert e.value.code == 404
+    assert json.loads(get(server + "/api/session/" + quote(found))[2])["recording_ok"] is False
+
+
+def test_cut_api_makes_a_clip_and_state_marks_the_suggestion_made(server, cfg, found):
+    status, body = post(server + "/api/cut", {"session": found, "start": 1.0, "end": 4.0, "title": "Game over",
+                                              "suggestion": 1})
+    assert status == 200 and body["file"] == "0h00m01s - Game over.mp4"
+    assert (cfg.paths.clips / found / body["file"]).is_file()
+    st = json.loads(get(server + "/api/state")[2])["sessions"][0]
+    assert st["editable"] and [(s["id"], s["made"]) for s in st["suggestions"]] == [(1, True), (2, False)]
+    clip = st["clips"][0]
+    assert clip["edit"] and clip["title"] == "Game over" and clip["length"] == 3 and clip["start"] == "0:00:01"
+
+
+@pytest.mark.parametrize("body", [
+    {"session": "2026-11-04 Lego", "start": 4.0, "end": 2.0, "title": "x"},
+    {"session": "nope", "start": 1.0, "end": 3.0, "title": "x"},
+    {"session": "..", "start": 1.0, "end": 3.0, "title": "x"},
+    {"session": "2026-11-04 Lego", "start": 1.0, "end": 3.0, "title": 5},
+])
+def test_cut_api_refuses_bad_requests_with_a_message(server, found, body):
+    status, reply = post(server + "/api/cut", body)
+    assert status == 400 and reply["error"]
+
+
+def test_legacy_sessions_are_not_editable(server, session):
+    st = json.loads(get(server + "/api/state")[2])["sessions"][0]
+    assert st["editable"] is False and st["suggestions"] == [] and st["clips"][0]["edit"] is False
+
+
+def test_restoring_into_a_taken_name_takes_the_session_file_along(server, cfg, found):
+    from teddyclip import session as sessions
+
+    post(server + "/api/archive", {"session": found})
+    (cfg.paths.clips / found).mkdir()  # a newer session got the same name meanwhile
+    assert post(server + "/api/unarchive", {"session": found})[0] == 200
+    moved = f"{found} (2)"
+    data = sessions.load(cfg, moved)
+    assert data is not None and data["name"] == moved and sessions.load(cfg, found) is None
