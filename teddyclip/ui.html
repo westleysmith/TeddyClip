@@ -72,6 +72,16 @@
   .k-joke { background: var(--teal); } .k-game { background: var(--plum); } .k-loud { background: var(--avocado); }
   .highlight { margin-bottom: 16px; max-width: 720px; }
   .empty { text-align: center; padding: 44px 20px; }
+  dialog#ask { border: 1.5px solid var(--line); border-radius: 20px; background: var(--card); color: var(--ink);
+               padding: 26px 28px 22px; width: min(420px, 90vw); box-shadow: 8px 8px 0 rgba(91, 61, 41, .18);
+               font: inherit; text-align: center; }
+  dialog#ask::backdrop { background: rgba(46, 35, 27, .45); }
+  dialog#ask h3 { margin: 10px 0 6px; font-size: 19px; color: var(--walnut); overflow-wrap: anywhere; }
+  dialog#ask p { margin: 0 0 20px; font-size: 14px; }
+  .ask-art { width: 46px; height: 46px; margin: 0 auto; border-radius: 50%;
+             background: radial-gradient(circle, var(--cream) 0 34%, transparent 35%), var(--orange);
+             box-shadow: 0 0 0 5px var(--mustard); }
+  .ask-buttons { display: flex; gap: 12px; justify-content: center; }
   .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--walnut);
            color: var(--cream); padding: 10px 18px; border-radius: 999px; display: none; box-shadow: 4px 4px 0 var(--orange); }
 </style>
@@ -109,6 +119,15 @@
   <div id="sessions"></div>
 </main>
 <div class="toast" id="toast"></div>
+<dialog id="ask">
+  <div class="ask-art" aria-hidden="true"></div>
+  <h3 id="ask-title"></h3>
+  <p id="ask-text" class="muted"></p>
+  <div class="ask-buttons">
+    <button id="ask-no">Cancel</button>
+    <button id="ask-yes" class="primary">Delete</button>
+  </div>
+</dialog>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -181,7 +200,7 @@ function clipCard(session, c) {
         <div class="title">${esc(c.title)}</div>
         ${c.why && c.why !== c.kind ? `<div class="why">${esc(c.why)}</div>` : ""}
         <div class="foot">${kind}<span class="muted">${esc(c.start)}</span><span class="spacer"></span>
-          <button class="small danger" data-delete="${esc(c.file)}" data-session="${esc(session)}">Delete</button></div>
+          <button class="small danger" data-delete="${esc(c.file)}" data-title="${esc(c.title)}" data-session="${esc(session)}">Delete</button></div>
       </div></div>`;
 }
 
@@ -227,13 +246,31 @@ async function refresh() {
   }
 }
 
+// A yes/no question in TeddyClip's own style (the browser's confirm box looks out of place).
+// Enter or Delete says yes; Esc, Cancel or a click outside says no.
+function ask(title, text) {
+  const d = $("ask");
+  $("ask-title").textContent = title;
+  $("ask-text").textContent = text;
+  return new Promise((resolve) => {
+    const done = (yes) => { d.onclose = null; d.close(); resolve(yes); };
+    $("ask-yes").onclick = () => done(true);
+    $("ask-no").onclick = () => done(false);
+    d.onclick = (e) => { if (e.target === d) done(false); };
+    d.onclose = () => resolve(false);
+    d.showModal();
+    $("ask-yes").focus();
+  });
+}
+
 $("add").onclick = () => post("/api/open", {folder: "inbox"});
 $("make").onclick = async () => { if (await post("/api/process")) refresh(); };
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.delete) {
-    if (!confirm(`Delete "${b.dataset.delete}"?\nIt goes to the Recycle Bin, so you can get it back.`)) return;
+    if (!await ask(`Delete "${b.dataset.title || b.dataset.delete}"?`,
+                   "It goes to the Recycle Bin, so you can get it back if you change your mind.")) return;
     if (await post("/api/delete", {session: b.dataset.session, file: b.dataset.delete})) { lastSessions = ""; refresh(); }
   } else if (b.dataset.highlight) {
     if (await post("/api/highlight", {session: b.dataset.highlight})) refresh();
