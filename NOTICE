@@ -41,3 +41,9 @@ faster-whisper
 RapidOCR
   https://github.com/RapidAI/RapidOCR
   License: Apache-2.0. Used as a dependency.
+
+Fredoka
+  https://github.com/hafontia/Fredoka-One (via https://github.com/google/fonts)
+  Copyright 2016 The Fredoka Project Authors
+  License: SIL Open Font License 1.1 (teddyclip/fonts/OFL.txt). Used for the
+  TeddyClip name in the window header.
