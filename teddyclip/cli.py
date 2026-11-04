@@ -15,11 +15,20 @@ import numpy as np
 import requests
 import yaml
 
-from teddyclip import progress
+from teddyclip import progress, session
 from teddyclip.config import Config, load_config
 from teddyclip.detectors import Lexicon, game_profile, screen_events
 from teddyclip.llm import LLM
-from teddyclip.media import CPU_ARGS, encoder_args, encoder_name, extract_audio, find_tool, probe
+from teddyclip.media import (
+    CPU_ARGS,
+    encoder_args,
+    encoder_name,
+    extract_audio,
+    find_tool,
+    make_preview,
+    probe,
+    window_playable,
+)
 from teddyclip.moments import (
     forced_windows,
     label,
@@ -32,8 +41,8 @@ from teddyclip.moments import (
     sweep,
 )
 from teddyclip.output import (
-    archive_original,
     build_highlight,
+    file_original,
     write_clips,
     write_moments_csv,
     write_resolve_edl,
@@ -183,11 +192,13 @@ def notes_file(cfg: Config, session: str) -> Path:
     return cfg.paths.notes / session / "moments.csv"
 
 
-def process_recording(path: Path, cfg: Config) -> Path:
-    """Find the moments in one recording, cut them into a clip folder with
-    moments.csv and Resolve markers, and move the original into Done with
-    chapters. A recording from outside the inbox is copied there instead and
-    left where it is. Returns the clip folder."""
+def process_recording(path: Path, cfg: Config, cut: bool = False) -> Path:
+    """Find the moments in one recording and save them as suggestions in the
+    session file, with the transcript and the laughter and yelling per second,
+    for the editor. The original moves to Finished recordings (an MKV becomes
+    an MP4; a recording from outside the inbox stays where it is). With `cut`,
+    every suggestion is also cut into the clip folder, as before the editor.
+    Returns the clip folder, which is empty unless `cut`."""
     path = Path(path)
     paths = cfg.paths
     paths.ensure()
@@ -276,27 +287,37 @@ def process_recording(path: Path, cfg: Config) -> Path:
         moments = rerank(moments, llm, load_prompt("rerank"))
     moments = select(moments, info.duration, clip_limit(info.duration, cfg))
 
-    kept = sum(m.keep for m in moments)
-    # Checked before anything is cut, so a full disk fails early and cleanly.
-    _check_room_for_original(path, paths.done)
-    print(f"Found {_count(len(moments), 'moment')}, cutting {_count(kept, 'clip')}")
+    kept = [m for m in moments if m.keep]
+    in_inbox = _in_inbox(path, cfg)
+    if in_inbox and path.suffix.lower() == ".mkv":
+        # Checked before anything is written, so a full disk fails early and cleanly.
+        _check_room_for_original(path, paths.done)
+    print(f"Found {_count(len(moments), 'moment')}, suggesting {_count(len(kept), 'clip')}")
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
-        with progress.band(0.90, 0.98, "Cutting clips"):
-            write_clips(path, moments, out_dir)
-        # TeddyClip's own record of every moment (the window reads it) stays out
-        # of the clip folder, so that folder holds only clips.
+        # TeddyClip's own record of every moment stays out of the clip folder,
+        # so that folder holds only clips.
         write_moments_csv(moments, notes_file(cfg, name))
         if cfg.resolve_markers:
             write_resolve_edl(moments, out_dir / "Resolve markers.edl", info.fps, cfg.resolve_timeline_start, name)
-
-        with progress.band(0.98, 1.00, "Filing the original in Finished recordings"):
-            if _in_inbox(path, cfg):
+        with progress.band(0.90, 0.95, "Filing the original in Finished recordings"):
+            if in_inbox:
                 print("Moving the original to Finished recordings...")
-                archive_original(path, paths.done, moments, name)
-            else:
-                print("Copying the original into Finished recordings (it is outside Raw recordings, so it stays where it is)...")
-                archive_original(path, paths.done, moments, name, keep_source=True)
+            recording = file_original(path, paths.done, name, in_inbox)
+        preview = None
+        if not window_playable(recording):
+            print("Making a preview copy the TeddyClip window can play...")
+            with progress.band(0.95, 1.00 if not cut else 0.97, "Making a preview the window can play"):
+                preview = make_preview(recording, session.session_dir(cfg, name) / "preview.mp4")
+        yelling = _highest(shout, jumps)
+        session.save(cfg, session.build(name, recording, preview, info.duration, segments,
+                                        laughter, yelling, moments))
+        if cut:
+            with progress.band(0.97, 1.00, "Cutting clips"):
+                clips = write_clips(recording, moments, out_dir)
+            for number, (clip, m) in enumerate(zip(clips, sorted(kept, key=lambda m: m.start)), start=1):
+                session.record_made(cfg, name, {"file": clip.name, "start": round(m.start, 1), "end": round(m.end, 1),
+                                                "title": m.title, "suggestion": number})
     except BaseException:
         _mark_incomplete(out_dir)
         raise
@@ -329,7 +350,7 @@ def _summary(why: str) -> str:
     return lines[0] if lines else why
 
 
-def process_inbox(cfg: Config, only: list[str] | None = None) -> int:
+def process_inbox(cfg: Config, only: list[str] | None = None, cut: bool = False) -> int:
     """Process every finished .mp4 and .mkv under the inbox, one at a time, or
     just the ones named in `only` (paths relative to the inbox, as the window
     lists them). A recording that fails stays in the inbox and the rest carry
@@ -361,7 +382,7 @@ def process_inbox(cfg: Config, only: list[str] | None = None) -> int:
         try:
             # Each recording takes an equal share of the progress bar.
             with progress.band(number / len(files), (number + 1) / len(files)):
-                processed.append(process_recording(path, cfg))
+                processed.append(process_recording(path, cfg, cut=cut))
         except Exception as e:
             print(f"Could not process {path.name}: {_describe(e)}")
             print("It stays in Raw recordings, so you can fix the problem and run TeddyClip again.")
@@ -369,7 +390,7 @@ def process_inbox(cfg: Config, only: list[str] | None = None) -> int:
 
     print(f"\nDone: {len(processed)} processed, {len(failed)} failed")
     for folder in processed:
-        print(f"  Clips in {folder}")
+        print(f"  {'Clips in' if cut else 'Suggestions ready for'} {folder}")
     for path, why in failed:
         print(f"  Failed: {path.name} ({_summary(why)})")
     if waiting:
@@ -495,9 +516,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Turn long gaming recordings into clips. With no command, every finished recording in 1 - Raw recordings is processed.",
     )
     parser.add_argument("--config", type=Path, help="config.yaml to use (default: config.yaml in the current folder)")
+    parser.add_argument("--cut-all", action="store_true",
+                        help="cut every suggestion into a clip right away instead of leaving them for the editor")
     commands = parser.add_subparsers(dest="command")
     one = commands.add_parser("process", help="process one recording")
     one.add_argument("file", type=Path)
+    one.add_argument("--cut-all", action="store_true", default=argparse.SUPPRESS,
+                     help="cut every suggestion into a clip right away")
     joined = commands.add_parser("highlight", help="join the clips left in a clip folder into a highlight video")
     joined.add_argument("folder", type=Path)
     commands.add_parser("check", help="check that ffmpeg, Ollama and the models are ready")
@@ -528,9 +553,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"No such file: {args.file}")
             return 1
         try:
-            process_recording(args.file, cfg)
+            process_recording(args.file, cfg, cut=args.cut_all)
         except Exception as e:
             print(f"Could not process {args.file.name}: {_describe(e)}")
             return 1
         return 0
-    return 1 if process_inbox(cfg) else 0
+    return 1 if process_inbox(cfg, cut=args.cut_all) else 0

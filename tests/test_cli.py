@@ -7,7 +7,7 @@ from pathlib import Path
 
 from conftest import stage_in_inbox
 
-from teddyclip import cli
+from teddyclip import cli, media, session
 from teddyclip.cli import check, is_finished, main, process_inbox, process_recording
 
 
@@ -25,7 +25,7 @@ def test_is_finished_is_false_while_another_program_has_the_file_open(tmp_path):
 
 def test_process_recording_end_to_end(fake_pipeline, tiny_video, cfg):
     fake_pipeline(trigger_at=8.0)
-    out = process_recording(stage_in_inbox(tiny_video, cfg, game="Elden Ring"), cfg)
+    out = process_recording(stage_in_inbox(tiny_video, cfg, game="Elden Ring"), cfg, cut=True)
     names = [p.name for p in out.glob("*.mp4")]
     assert any("Clip that" in n for n in names)
     # The clip folder holds only clips; TeddyClip's notes live in its working folder.
@@ -73,7 +73,7 @@ def test_process_recording_with_no_moments(fake_pipeline, tiny_video, cfg):
 def test_process_recording_continues_without_ollama(fake_pipeline, tiny_video, cfg, monkeypatch, capsys):
     fake_pipeline(trigger_at=8.0)
     monkeypatch.setattr(cli.LLM, "available", lambda self: False)
-    out = process_recording(stage_in_inbox(tiny_video, cfg), cfg)
+    out = process_recording(stage_in_inbox(tiny_video, cfg), cfg, cut=True)
     assert "continuing without AI titles" in capsys.readouterr().out
     assert any("Clip that" in p.name for p in out.glob("*.mp4"))
 
@@ -81,7 +81,7 @@ def test_process_recording_continues_without_ollama(fake_pipeline, tiny_video, c
 def test_inbox_continues_after_failure(fake_pipeline, tiny_video, cfg, monkeypatch):
     a = stage_in_inbox(tiny_video, cfg, name="a.mp4"); b = stage_in_inbox(tiny_video, cfg, name="b.mp4")
     real = cli.process_recording
-    monkeypatch.setattr(cli, "process_recording", lambda p, c: (_ for _ in ()).throw(RuntimeError()) if p == a else real(p, c))
+    monkeypatch.setattr(cli, "process_recording", lambda p, c, cut=False: (_ for _ in ()).throw(RuntimeError()) if p == a else real(p, c))
     monkeypatch.setattr(cli, "is_finished", lambda p, **k: True)
     assert process_inbox(cfg) == 1 and a.exists() and not b.exists()
 
@@ -94,7 +94,7 @@ def test_inbox_picks_only_finished_videos(cfg, monkeypatch, capsys):
     (cfg.paths.inbox / "notes.txt").write_text("hi")
     seen = []
     monkeypatch.setattr(cli, "is_finished", lambda p, **k: p != growing)
-    monkeypatch.setattr(cli, "process_recording", lambda p, c: seen.append(p) or cfg.paths.clips)
+    monkeypatch.setattr(cli, "process_recording", lambda p, c, cut=False: seen.append(p) or cfg.paths.clips)
     assert process_inbox(cfg) == 0
     assert seen == [done]
     assert "1 processed, 0 failed" in capsys.readouterr().out
@@ -158,10 +158,10 @@ def test_process_outside_the_inbox_keeps_the_original(fake_pipeline, tiny_video,
     date = time.strftime("%Y-%m-%d", time.localtime(src.stat().st_mtime))
     conf = tmp_path / "config.yaml"
     conf.write_text(f"root: '{cfg.root}'\n", encoding="utf-8")
-    assert main(["--config", str(conf), "process", str(src)]) == 0
-    assert src.exists()
-    assert (cfg.paths.done / f"{date} session.mp4").exists()
+    assert main(["--config", str(conf), "process", "--cut-all", str(src)]) == 0
+    assert src.exists() and not (cfg.paths.done / f"{date} session.mp4").exists()
     assert any("Clip that" in p.name for p in (cfg.paths.clips / f"{date} session").glob("*.mp4"))
+    assert session.load(cfg, f"{date} session")["recording"] == str(src)
 
 
 def test_process_recording_passes_language_and_device_to_whisper(fake_pipeline, tiny_video, cfg):
@@ -215,35 +215,39 @@ def test_inbox_summary_shows_the_meaningful_line(cfg, monkeypatch, capsys):
     cfg.paths.ensure()
     (cfg.paths.inbox / "a.mp4").write_bytes(b"x")
     monkeypatch.setattr(cli, "is_finished", lambda p, **k: True)
-    monkeypatch.setattr(cli, "process_recording", lambda p, c: (_ for _ in ()).throw(RuntimeError(FFMPEG_ERROR)))
+    monkeypatch.setattr(cli, "process_recording", lambda p, c, cut=False: (_ for _ in ()).throw(RuntimeError(FFMPEG_ERROR)))
     assert process_inbox(cfg) == 1
     summary = capsys.readouterr().out.split("\nDone:")[1]
     assert "Failed: a.mp4 ([out#0/mp4 @ 000001] Error writing trailer: No space left on device)" in summary
     assert "exit code" not in summary
 
 
-def test_a_full_done_drive_stops_before_any_clip_is_cut(fake_pipeline, tiny_video, cfg, monkeypatch):
+def test_a_full_finished_drive_stops_before_an_mkv_is_converted(fake_pipeline, tiny_video, cfg, monkeypatch):
     fake_pipeline(trigger_at=8.0)
-    src = stage_in_inbox(tiny_video, cfg)
+    mkv = tiny_video.with_suffix(".mkv")
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tiny_video), "-c", "copy", str(mkv)], check=True)
+    src = stage_in_inbox(mkv, cfg)
     monkeypatch.setattr(cli.shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(100, 99, 1))
-    monkeypatch.setattr(cli, "write_clips", lambda *a, **k: (_ for _ in ()).throw(AssertionError("clips cut")))
-    try:
+    with pytest.raises(RuntimeError) as e:
         process_recording(src, cfg)
-    except RuntimeError as e:
-        message = str(e)
-    else:
-        raise AssertionError("no error")
-    assert message.startswith("Not enough free space on ") and "to file the original in Finished recordings: need about" in message
-    assert src.exists()
-    assert not [p for p in cfg.paths.clips.iterdir()]
+    assert str(e.value).startswith("Not enough free space on ")
+    assert "to file the original in Finished recordings: need about" in str(e.value)
+    assert src.exists() and not [p for p in cfg.paths.clips.iterdir()]
+
+
+def test_an_mp4_is_filed_even_when_the_drive_is_nearly_full(fake_pipeline, tiny_video, cfg, monkeypatch):
+    fake_pipeline(trigger_at=8.0)
+    monkeypatch.setattr(cli.shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(100, 99, 1))
+    process_recording(stage_in_inbox(tiny_video, cfg), cfg)  # a move needs no room
+    assert list(cfg.paths.done.glob("*.mp4"))
 
 
 def test_a_failed_run_leaves_its_clip_folder_marked_incomplete(fake_pipeline, tiny_video, cfg, monkeypatch):
     fake_pipeline(trigger_at=8.0)
     src = stage_in_inbox(tiny_video, cfg)
     date = time.strftime("%Y-%m-%d", time.localtime(src.stat().st_mtime))
-    real_archive = cli.archive_original
-    monkeypatch.setattr(cli, "archive_original", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk gone")))
+    real_file = cli.file_original
+    monkeypatch.setattr(cli, "file_original", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk gone")))
     for _ in range(2):
         try:
             process_recording(src, cfg)
@@ -253,9 +257,8 @@ def test_a_failed_run_leaves_its_clip_folder_marked_incomplete(fake_pipeline, ti
             raise AssertionError("no error")
     names = sorted(p.name for p in cfg.paths.clips.iterdir())
     assert names == [f"{date} tiny (incomplete 2)", f"{date} tiny (incomplete)"]
-    assert any((cfg.paths.clips / f"{date} tiny (incomplete)").glob("*.mp4"))
     assert src.exists()
-    monkeypatch.setattr(cli, "archive_original", real_archive)
+    monkeypatch.setattr(cli, "file_original", real_file)
     assert process_recording(src, cfg).name == f"{date} tiny"
 
 
@@ -268,7 +271,7 @@ def test_inbox_skips_an_mkv_that_obs_already_remuxed_to_mp4(cfg, monkeypatch, ca
     (cfg.paths.inbox / "session.mkv").write_bytes(b"x")   # no .mp4 next to this one
     seen = []
     monkeypatch.setattr(cli, "is_finished", lambda p, **k: True)
-    monkeypatch.setattr(cli, "process_recording", lambda p, c: seen.append(p) or cfg.paths.clips)
+    monkeypatch.setattr(cli, "process_recording", lambda p, c, cut=False: seen.append(p) or cfg.paths.clips)
     assert process_inbox(cfg) == 0
     assert sorted(seen) == sorted([game / "session.mp4", game / "other.mkv", cfg.paths.inbox / "session.mkv"])
     out = capsys.readouterr().out
@@ -289,6 +292,48 @@ def test_process_inbox_can_take_just_some_recordings(cfg, monkeypatch):
         old = time.time() - 600
         os.utime(f, (old, old))
     done = []
-    monkeypatch.setattr(cli, "process_recording", lambda p, c: done.append(p.name) or p)
+    monkeypatch.setattr(cli, "process_recording", lambda p, c, cut=False: done.append(p.name) or p)
     assert cli.process_inbox(cfg, only=[str(Path("B") / "two.mp4")]) == 0
     assert done == ["two.mp4"]
+
+
+def test_finding_clips_cuts_nothing_and_saves_the_session(fake_pipeline, tiny_video, cfg):
+    fake_pipeline(trigger_at=8.0)
+    src = stage_in_inbox(tiny_video, cfg, game="Elden Ring")
+    out = process_recording(src, cfg)
+    assert out.is_dir() and list(out.iterdir()) == []
+    data = session.load(cfg, out.name)
+    filed = cfg.paths.done / f"{out.name}.mp4"
+    assert data["recording"] == str(filed) and filed.exists() and data["preview"] is None
+    assert "trigger" in [s["kind"] for s in data["suggestions"]] and data["made"] == []
+    assert len(data["cues"]["laughter"]) == len(data["cues"]["yelling"]) == 10
+    assert data["cues"]["laughter"][3] > 0
+    assert data["segments"] == [{"start": 8.0, "end": 8.7, "text": "Clip that!"}]
+
+
+def test_cut_all_cuts_every_suggestion_and_records_it(fake_pipeline, tiny_video, cfg):
+    fake_pipeline(trigger_at=8.0)
+    out = process_recording(stage_in_inbox(tiny_video, cfg), cfg, cut=True)
+    data = session.load(cfg, out.name)
+    assert sorted(p.name for p in out.glob("*.mp4")) == sorted(m["file"] for m in data["made"])
+    assert len(data["made"]) == len(data["suggestions"]) > 0
+    assert {m["suggestion"] for m in data["made"]} == {s["id"] for s in data["suggestions"]}
+
+
+def test_a_recording_the_window_cannot_play_gets_a_preview(fake_pipeline, tiny_video, cfg):
+    fake_pipeline(trigger_at=8.0)
+    hevc = tiny_video.with_name("hevc.mp4")
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(tiny_video), "-c:v", "libx265", "-c:a", "copy", str(hevc)],
+                   check=True)
+    out = process_recording(stage_in_inbox(hevc, cfg), cfg)
+    preview = Path(session.load(cfg, out.name)["preview"])
+    assert preview.parent == session.session_dir(cfg, out.name) and media.window_playable(preview)
+
+
+@pytest.mark.parametrize("argv, cut", [([], False), (["--cut-all"], True)])
+def test_cut_all_flag_reaches_the_inbox_run(cfg, tmp_path, monkeypatch, argv, cut):
+    seen = []
+    monkeypatch.setattr(cli, "process_inbox", lambda c, only=None, cut=False: seen.append(cut) or 0)
+    conf = tmp_path / "config.yaml"
+    conf.write_text(f"root: '{cfg.root}'\n", encoding="utf-8")
+    assert main(["--config", str(conf), *argv]) == 0 and seen == [cut]
