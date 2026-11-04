@@ -313,6 +313,15 @@ function renderJob(job) {
   if (atBottom) log.scrollTop = log.scrollHeight;
 }
 
+// "0:01:43" and 41 -> "at 1:43 · 41s"
+function clipWhen(c) {
+  const at = (c.start || "").replace(/^0:0?/, "");
+  const parts = [];
+  if (at) parts.push(`at ${esc(at)}`);
+  if (c.length) parts.push(`${c.length}s`);
+  return parts.join(" · ");
+}
+
 function clipCard(session, c) {
   const kind = (c.kind ? `<span class="badge k-${esc(c.kind)}">${esc(KIND[c.kind] || c.kind)}</span>` : "") +
     (c.events || []).map((e) => `<span class="badge k-game">${esc(e)}</span>`).join("");
@@ -321,7 +330,7 @@ function clipCard(session, c) {
       <div class="info">
         <div class="title">${esc(c.title)}</div>
         ${c.why && c.why !== c.kind ? `<div class="why">${esc(c.why)}</div>` : ""}
-        <div class="foot">${kind}<span class="muted">${esc(c.start)}</span><span class="spacer"></span>
+        <div class="foot">${kind}<span class="muted" title="Where this clip starts in the full recording, and how long the clip is">${clipWhen(c)}</span><span class="spacer"></span>
           <button class="small danger" data-delete="${esc(c.file)}" data-title="${esc(c.title)}" data-session="${esc(session)}">Delete</button></div>
       </div></div>`;
 }

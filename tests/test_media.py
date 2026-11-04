@@ -137,6 +137,24 @@ def test_cut_retries_on_cpu_when_hardware_encoder_fails(tiny_video, tmp_path, mo
 def test_cut_failure_reports_ffmpeg_tail(tmp_path):
     with pytest.raises(RuntimeError, match="ffmpeg"):
         cut(tmp_path / "nope.mp4", 0, 1, tmp_path / "o.mp4")
+    assert list(tmp_path.iterdir()) == []  # no half-written leftovers
+
+
+def test_cut_only_shows_up_once_finished(tiny_video, tmp_path, monkeypatch):
+    # The app lists *.mp4 while a job runs; a clip still being written must not be one.
+    seen = []
+    real_run = subprocess.run
+
+    def spy(cmd, *a, **k):
+        result = real_run(cmd, *a, **k)
+        seen.append(sorted(p.name for p in out_dir.iterdir()))
+        return result
+
+    out_dir = tmp_path / "clips"
+    monkeypatch.setattr(media.subprocess, "run", spy)
+    out = cut(tiny_video, 1.0, 3.0, out_dir / "c.mp4")
+    assert seen[-1] == ["c.mp4.part"]  # right after ffmpeg: still the temporary name
+    assert sorted(p.name for p in out_dir.iterdir()) == ["c.mp4"] and out.is_file()
 
 
 def test_encoder_args_falls_back_to_cpu_without_gpu(monkeypatch):

@@ -57,7 +57,7 @@ def test_state_lists_inbox_and_clips_with_csv_notes(server, cfg, session):
     assert [f["name"] for f in st["inbox"]] == ["new.mp4"]
     clip = st["sessions"][0]["clips"][0]
     assert st["sessions"][0]["name"] == "2026-11-03 Elden Ring"
-    assert (clip["title"], clip["kind"], clip["start"]) == ("Boss fight", "trigger", "0:00:10")
+    assert (clip["title"], clip["kind"], clip["start"], clip["length"]) == ("Boss fight", "trigger", "0:00:10", 45)
     assert clip["events"] == ["YOU DIED"]
     assert st["sessions"][0]["highlight"] is None and st["job"]["running"] is False
 
@@ -246,6 +246,15 @@ def test_make_clips_for_just_the_ticked_recordings(server, cfg, monkeypatch):
 @pytest.mark.parametrize("files", [[], [r"..\..\Windows\win.ini"], ["../../x.mp4"], ["missing.mp4"], [5], "a.mp4"])
 def test_make_clips_rejects_anything_outside_raw_recordings(server, files):
     assert post(server + "/api/process", {"files": files})[0] == 400
+
+
+def test_a_remade_clip_gets_a_new_link_so_the_player_reloads_it(server, session):
+    clip = session / "0h00m09s - Clip that - Boss fight.mp4"
+    first = json.loads(get(server + "/api/state")[2])["sessions"][0]["clips"][0]["url"]
+    clip.write_bytes(b"a longer, finished clip")
+    second = json.loads(get(server + "/api/state")[2])["sessions"][0]["clips"][0]["url"]
+    assert first != second and first.split("?")[0] == second.split("?")[0]
+    assert get(server + second)[2] == b"a longer, finished clip"
 
 
 def test_raw_recordings_can_be_previewed(server, cfg):

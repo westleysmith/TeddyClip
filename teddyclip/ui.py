@@ -179,6 +179,28 @@ def _media_url(kind: str, *parts: str) -> str:
     return "/media/" + kind + "/" + "/".join(quote(p) for p in parts)
 
 
+def _versioned(url: str, file: Path) -> str:
+    """Tag a media link with the file's size and time, so a file that changed
+    (a clip remade, a highlight redone) is fetched fresh instead of from the
+    player's cache."""
+    try:
+        st = file.stat()
+    except OSError:  # deleted a moment ago; the next refresh drops it
+        return url
+    return f"{url}?v={st.st_size}-{st.st_mtime_ns}"
+
+
+def _seconds(hms: str) -> float | None:
+    """'0:01:43' -> 103.0; None when it is not a time."""
+    try:
+        total = 0.0
+        for part in hms.split(":"):
+            total = total * 60 + float(part)
+        return total
+    except (AttributeError, ValueError):
+        return None
+
+
 def _clip_notes(cfg: Config, session: Path) -> dict[str, dict]:
     """Title, reason and tags per clip file, from moments.csv (kept in the
     working folder; clip folders from older versions have it inside)."""
@@ -286,14 +308,17 @@ def state(cfg: Config, job: Job) -> dict:
             for clip in sorted(folder.glob("*.mp4"), key=lambda p: p.name):
                 row = notes.get(clip.name, {})
                 title = row.get("title") or clip.stem.split(" - ", 1)[-1]
+                start, end = _seconds(row.get("start")), _seconds(row.get("end"))
                 clips.append({"file": clip.name, "title": title, "why": row.get("why", ""),
                               "kind": row.get("kind", ""), "start": row.get("start", ""),
+                              "length": round(end - start) if start is not None and end is not None else None,
                               "events": [e.strip() for e in row.get("events", "").split(";") if e.strip()],
-                              "url": _media_url("clips", folder.name, clip.name)})
+                              "url": _versioned(_media_url("clips", folder.name, clip.name), clip)})
             highlight = paths.highlights / f"{folder.name}.mp4"
             sessions.append({"name": folder.name, "clips": clips,
                              "incomplete": "(incomplete" in folder.name,
-                             "highlight": _media_url("highlights", highlight.name) if highlight.is_file() else None})
+                             "highlight": _versioned(_media_url("highlights", highlight.name), highlight)
+                             if highlight.is_file() else None})
     archived = []
     shelf = paths.clips / ARCHIVE
     if shelf.is_dir():

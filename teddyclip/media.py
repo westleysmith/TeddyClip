@@ -8,6 +8,7 @@ real test encode, otherwise use libx264) and the CPU retry in video/cutter.py.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -78,6 +79,18 @@ def _tool(name: str) -> str:
 
 # The TeddyClip window has no console, so each ffmpeg run would otherwise flash one.
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
+@contextlib.contextmanager
+def _writing(dst: Path) -> Iterator[Path]:
+    """A temporary name next to `dst` that becomes `dst` only once ffmpeg has
+    finished, so the app never lists (or tries to play) a half-written video."""
+    part = dst.with_name(dst.name + ".part")
+    try:
+        yield part
+        os.replace(part, dst)
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def _run(cmd: list[str], what: str) -> subprocess.CompletedProcess:
@@ -238,26 +251,27 @@ def cut(src: Path, start: float, end: float, dst: Path) -> Path:
         ]
     )
     enc = encoder_args()
-    cmd = [
-        _tool("ffmpeg"), "-y", "-v", "error",
-        "-ss", f"{start:.3f}",  # before -i: fast seek, then decode to the exact frame
-        "-i", str(Path(src).resolve()),
-        "-t", f"{length:.3f}",
-        "-map", "0:v:0", "-map", "0:a:0?",
-        "-fps_mode", "cfr",  # VFR recordings otherwise drift against the audio
-        "-af", audio_filter,
-        *enc, "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "160k",
-        "-movflags", "+faststart",
-        str(dst.resolve()),
-    ]
-    result = subprocess.run(cmd, capture_output=True, **NO_WINDOW)
-    if result.returncode != 0 and enc != CPU_ARGS:
-        # The start-up probe only sees a synthetic frame; the real footage can still be refused.
-        log.warning("Hardware encoder refused %s, retrying on the CPU", Path(src).name)
-        result = subprocess.run(_swap_encoder(cmd, enc, CPU_ARGS), capture_output=True, **NO_WINDOW)
-    if result.returncode != 0:
-        _fail(f"cut {Path(src).name} from {start:.1f}s to {end:.1f}s", result)
+    with _writing(dst.resolve()) as part:
+        cmd = [
+            _tool("ffmpeg"), "-y", "-v", "error",
+            "-ss", f"{start:.3f}",  # before -i: fast seek, then decode to the exact frame
+            "-i", str(Path(src).resolve()),
+            "-t", f"{length:.3f}",
+            "-map", "0:v:0", "-map", "0:a:0?",
+            "-fps_mode", "cfr",  # VFR recordings otherwise drift against the audio
+            "-af", audio_filter,
+            *enc, "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "160k",
+            "-movflags", "+faststart",
+            "-f", "mp4", str(part),
+        ]
+        result = subprocess.run(cmd, capture_output=True, **NO_WINDOW)
+        if result.returncode != 0 and enc != CPU_ARGS:
+            # The start-up probe only sees a synthetic frame; the real footage can still be refused.
+            log.warning("Hardware encoder refused %s, retrying on the CPU", Path(src).name)
+            result = subprocess.run(_swap_encoder(cmd, enc, CPU_ARGS), capture_output=True, **NO_WINDOW)
+        if result.returncode != 0:
+            _fail(f"cut {Path(src).name} from {start:.1f}s to {end:.1f}s", result)
     return dst
 
 
@@ -271,13 +285,13 @@ def concat(files: list[Path], dst: Path) -> Path:
         raise ValueError("concat needs at least one file")
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, _writing(dst.resolve()) as part:
         listing = Path(tmp) / "list.txt"
         listing.write_text("".join(f"file {_quote_concat(f)}\n" for f in files), encoding="utf-8")
         _run(
             [
                 _tool("ffmpeg"), "-y", "-v", "error", "-f", "concat", "-safe", "0",
-                "-i", str(listing), "-c", "copy", "-movflags", "+faststart", str(dst.resolve()),
+                "-i", str(listing), "-c", "copy", "-movflags", "+faststart", "-f", "mp4", str(part),
             ],
             "join the clips",
         )
@@ -305,13 +319,14 @@ def write_chapters(src: Path, dst: Path, chapters: list[Chapter]) -> Path:
             f"END={round(c.end * 1000)}",
             f"title={_escape_meta(c.title)}",
         ]
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, _writing(dst.resolve()) as part:
         meta = Path(tmp) / "chapters.ffmeta"
         meta.write_text("\n".join(lines) + "\n", encoding="utf-8")
         _run(
             [
                 _tool("ffmpeg"), "-y", "-v", "error", "-i", str(Path(src).resolve()), "-i", str(meta),
-                "-map", "0", "-c", "copy", "-map_chapters", "1", str(dst.resolve()),
+                "-map", "0", "-c", "copy", "-map_chapters", "1",
+                "-f", "matroska" if dst.suffix.lower() == ".mkv" else "mp4", str(part),
             ],
             f"write chapters into {Path(src).name}",
         )
