@@ -194,8 +194,8 @@ $root = (& $venvPy -c "from teddyclip.config import load_config; c = load_config
 $desktop = [Environment]::GetFolderPath('Desktop')
 if ($SkipShortcuts) { $desktop = Join-Path $InstallDir 'shortcuts-test'; New-Item -ItemType Directory -Force $desktop | Out-Null }
 $shell = New-Object -ComObject WScript.Shell
-function Make-Shortcut($name, $target, $icon, $style = 1) {
-    $lnk = $shell.CreateShortcut((Join-Path $desktop "$name.lnk"))
+function Make-Shortcut($folder, $name, $target, $icon, $style = 1) {
+    $lnk = $shell.CreateShortcut((Join-Path $folder "$name.lnk"))
     $lnk.TargetPath = $target
     $lnk.WorkingDirectory = $InstallDir
     $lnk.IconLocation = $icon
@@ -206,9 +206,16 @@ function Make-Shortcut($name, $target, $icon, $style = 1) {
 foreach ($old in 'TeddyClip - Make Clips', 'TeddyClip - Make Highlight') {
     Remove-Item (Join-Path $desktop "$old.lnk") -ErrorAction SilentlyContinue
 }
-Make-Shortcut 'TeddyClip' (Join-Path $InstallDir 'Open TeddyClip.bat') 'shell32.dll,137' 7
-Make-Shortcut 'TeddyClip Folders' $root 'shell32.dll,3'
-Write-Host "Added 2 shortcuts to the desktop: TeddyClip and TeddyClip Folders."
+$logo = Join-Path $InstallDir 'teddyclip\teddyclip.ico'
+$open = Join-Path $InstallDir 'Open TeddyClip.bat'
+Make-Shortcut $desktop 'TeddyClip' $open "$logo,0" 7
+Make-Shortcut $desktop 'TeddyClip Folders' $root 'shell32.dll,3'
+if (-not $SkipShortcuts) {
+    # Start menu too, so TeddyClip shows up when you search for it.
+    Make-Shortcut ([Environment]::GetFolderPath('Programs')) 'TeddyClip' $open "$logo,0" 7
+}
+Write-Host "Added TeddyClip to the desktop and the Start menu, plus a TeddyClip Folders shortcut."
+Write-Host "To pin it, right-click the TeddyClip icon and choose Pin to taskbar or Pin to Start."
 
 Say "Checking everything"
 & (Join-Path $InstallDir '.venv\Scripts\teddyclip.exe') check
