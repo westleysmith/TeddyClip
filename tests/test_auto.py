@@ -34,7 +34,7 @@ def test_on_files_loose_recordings_under_the_game_and_starts(cfg, job):
     ui.save_settings(cfg, {"auto": True, "auto_game": "Elden Ring"})
     rec = recording(cfg.paths.inbox / "2026-11-05 20-00-00.mp4")
     assert ui.auto_tick(cfg, job) == "started"
-    assert job.started_names == ["Making clips (automatic)"]
+    assert job.started_names == ["Finding clips (automatic)"]
     assert (cfg.paths.inbox / "Elden Ring" / rec.name).exists() and not rec.exists()
 
 
