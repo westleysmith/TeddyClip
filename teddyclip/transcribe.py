@@ -217,6 +217,34 @@ def _load_model(model_size: str, device: str = "auto"):
     return WhisperModel(model_size, device="cpu", compute_type="int8")
 
 
+def pick_engine(device: str = "auto", models: Path | None = None) -> tuple[str, str]:
+    """Which engine transcribes, and why, in plain words: faster-whisper on an
+    NVIDIA card (fastest), whisper.cpp through Vulkan on any other graphics
+    card, faster-whisper on the CPU when neither is possible."""
+    if device == "cpu":
+        return "cpu", "whisper_device is set to cpu"
+    ready, reason = gpu_ready()
+    if ready:
+        return "cuda", "NVIDIA graphics card (faster-whisper)"
+    if models is not None:
+        from teddyclip import whispercpp
+
+        installed, why_not = whispercpp.available(models)
+        if installed:
+            return "whisper.cpp", "graphics card through Vulkan (whisper.cpp)"
+        reason = f"{reason}; {why_not}"
+    return "cpu", reason
+
+
+def _run_whispercpp(wav: Path, models: Path, cache: Path, language: str | None) -> list[Segment]:
+    from teddyclip import whispercpp
+
+    print("  Whisper: transcribing on the graphics card through Vulkan (whisper.cpp)")
+    raw, device = whispercpp.run(wav, models, cache, language)
+    print(f"  Whisper: used {device}" if device else "  Whisper: no Vulkan graphics card answered; whisper.cpp ran on the CPU")
+    return whispercpp.to_segments(raw)
+
+
 def release() -> None:
     """Free the model and the GPU memory it held, so Ollama can use the GPU."""
     global _model
@@ -309,6 +337,7 @@ def transcribe(
     hotwords: list[str] | None = None,
     language: str | None = "en",
     device: str = "auto",
+    models: Path | None = None,
 ) -> list[Segment]:
     """Segments with word timings for `wav`, cached as cache/transcript.json.
 
@@ -322,6 +351,16 @@ def transcribe(
     cached = _read_cache(cache_path)
     if cached is not None:
         return cached
+
+    if pick_engine(device, models)[0] == "whisper.cpp":
+        try:
+            segments = _run_whispercpp(wav, models, cache, language)
+            segments = collapse_repetition_loops(segments)
+            _write_cache(cache_path, segments)
+            return segments
+        except Exception as e:  # a driver or engine problem: the CPU still works
+            print(f"\n  Whisper: the graphics card failed ({str(e)[:160]}); transcribing on the CPU instead")
+            device = "cpu"
 
     print(f"  Loading whisper model '{model}'...")
     _model = _load_model(model, "cpu" if device == "cpu" else "auto")

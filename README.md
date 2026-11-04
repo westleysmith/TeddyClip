@@ -16,7 +16,9 @@ TeddyClip is a personal auto-clipper for long gaming recordings with commentary.
    - Optional per-game screen detectors (for example a "YOU DIED" screen), chosen by the game folder name.
 3. **Pick moments** with a small local AI model (via Ollama) that finds quiet jokes in the transcript and titles each moment. No cloud, no cost. If Ollama is not running, TeddyClip carries on without AI titles.
 4. **Cut clips** named by timestamp and what happened, write a `moments.csv` and a DaVinci Resolve marker file, then move the original recording to `Done` with chapters added.
-5. **Review** by deleting the clips you don't want, then build a highlight video with YouTube chapters. NVIDIA NVENC is used when available.
+5. **Review** by deleting the clips you don't want, then build a highlight video with YouTube chapters.
+
+TeddyClip uses the graphics card when it can, whatever the brand: transcription runs on NVIDIA cards with faster-whisper and on AMD and Intel graphics with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) through Vulkan, and clips are cut with the card's video encoder (NVIDIA NVENC, AMD AMF or Intel Quick Sync). Without a usable graphics card everything still works on the CPU, more slowly.
 
 ## Easy install (Windows, recommended)
 
@@ -29,7 +31,7 @@ No typing needed. On Windows 10 or 11:
    - **TeddyClip** opens TeddyClip in its own window. Everything happens there.
    - **TeddyClip Folders** opens the folder where recordings go in and clips come out.
 
-It installs Python 3.12, FFmpeg and Ollama (with winget), puts TeddyClip in `%LOCALAPPDATA%\TeddyClip-app`, adds GPU support when it finds an NVIDIA card, and downloads the AI models so the first run starts straight away. Run it again any time to update TeddyClip; your settings in `config.yaml` are kept.
+It installs Python 3.12, FFmpeg and Ollama (with winget), puts TeddyClip in `%LOCALAPPDATA%\TeddyClip-app`, sets up transcription on the graphics card (NVIDIA, AMD or Intel), and downloads the AI models so the first run starts straight away. Run it again any time to update TeddyClip; your settings in `config.yaml` are kept.
 
 ## Manual install (Windows)
 
@@ -117,7 +119,7 @@ Everything works with no changes except the names. The settings are in `config.y
 | `triggers` | The phrases that always make a clip. Add any variants the transcript mishears. |
 | `audio_track` | Which OBS audio track holds your microphones (for example `2`). Leave as `null` to use track 1. See the [OBS setup guide](docs/obs-setup.md). |
 | `whisper_model` | `auto` picks a large model on a GPU (with the GPU libraries installed) and a small one on the CPU. |
-| `whisper_device` | `auto` uses the NVIDIA GPU for transcribing when it works, otherwise the CPU. `cpu` never touches the GPU. |
+| `whisper_device` | `auto` transcribes on the graphics card when it works (NVIDIA with faster-whisper, any other card with whisper.cpp through Vulkan), otherwise the CPU. `cpu` never touches the graphics card. |
 | `language` | The language you speak, default `en`. Set it to `null` to let whisper guess, which often goes wrong when a recording starts with game music. |
 | `llm: model` | The Ollama model for jokes and titles, or `none` to turn the AI off. |
 | `clips:` | `min_seconds` and `max_seconds` (clip length, default 20 to 120), `max_clips` (default 40), `pre_trigger_seconds` (how far back a "clip that" clip starts, default 45). |

@@ -28,6 +28,12 @@ AudioSet ontology labels
   https://research.google.com/audioset/
   Google, CC BY 4.0. Downloaded at runtime.
 
+whisper.cpp
+  https://github.com/ggml-org/whisper.cpp
+  Copyright (c) 2023-2026 The ggml authors
+  License: MIT. Built with Vulkan by .github/workflows/whisper-vulkan.yml and
+  downloaded by the installer on PCs without an NVIDIA graphics card.
+
 faster-whisper
   https://github.com/SYSTRAN/faster-whisper
   License: MIT. Used as a dependency.

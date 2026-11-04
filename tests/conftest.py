@@ -87,7 +87,7 @@ def fake_pipeline(monkeypatch):
         with wave.open(str(wav), "rb") as f:
             return f.getnframes() // f.getframerate()
 
-    def transcribe(wav, cache, model="auto", hotwords=None, language="en", device="auto"):
+    def transcribe(wav, cache, model="auto", hotwords=None, language="en", device="auto", models=None):
         state["transcribe_calls"].append({"model": model, "language": language, "device": device})
         t = state["trigger_at"]
         if t is None:

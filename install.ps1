@@ -14,6 +14,9 @@ param(
 # 'Stop' would turn harmless warnings they print into fatal errors.
 $ErrorActionPreference = 'Continue'
 $Repo = 'westleysmith/TeddyClip'
+$WhisperTag = 'whisper-vulkan-v1.9.5'  # the release .github/workflows/whisper-vulkan.yml made
+# Windows PowerShell's download progress bar makes large downloads many times slower.
+$ProgressPreference = 'SilentlyContinue'
 
 function Say($text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
 function Fail($text) {
@@ -184,6 +187,31 @@ download_model('$whisper')
 "@
     & $venvPy -c $prefetch
     if ($LASTEXITCODE -ne 0) { Write-Host "Could not download every model now. TeddyClip will try again on its first run." -ForegroundColor Yellow }
+
+    if (-not $nvidia) {
+        # No NVIDIA card: transcribe on whatever graphics card there is (AMD,
+        # Intel...) with whisper.cpp through Vulkan, built by this repository.
+        Write-Host "Setting up transcription on your graphics card (whisper.cpp with Vulkan)..."
+        try {
+            $engine = Join-Path $InstallDir 'engines\whisper-vulkan'
+            $zip = Join-Path $env:TEMP 'whisper-vulkan-win-x64.zip'
+            Invoke-WebRequest "https://github.com/$Repo/releases/download/$WhisperTag/whisper-vulkan-win-x64.zip" -OutFile $zip -UseBasicParsing -ErrorAction Stop
+            if (Test-Path $engine) { Remove-Item $engine -Recurse -Force }
+            New-Item -ItemType Directory -Force $engine | Out-Null
+            Expand-Archive $zip $engine -Force -ErrorAction Stop
+            Remove-Item $zip -Force
+            $models = (& $venvPy -c "from teddyclip.config import load_config; print(load_config().paths.models)").Trim()
+            $ggml = Join-Path $models 'ggml-large-v3-turbo-q5_0.bin'
+            if (-not (Test-Path $ggml)) {
+                Write-Host "Downloading its speech model (about 550 MB)..."
+                Invoke-WebRequest 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin' -OutFile "$ggml.part" -UseBasicParsing -ErrorAction Stop
+                Move-Item "$ggml.part" $ggml -Force
+            }
+            Write-Host "Graphics-card transcription is ready."
+        } catch {
+            Write-Host "Could not set up graphics-card transcription ($($_.Exception.Message)). TeddyClip will transcribe on the CPU, which is slower." -ForegroundColor Yellow
+        }
+    }
 } else {
     Say "Step 5 of 6: skipped downloading models"
 }

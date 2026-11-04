@@ -49,7 +49,7 @@ from teddyclip.signals import (
     people_sounds,
     voice_jump,
 )
-from teddyclip.transcribe import all_words, gpu_ready, release, transcribe
+from teddyclip.transcribe import all_words, pick_engine, release, transcribe
 
 VIDEO_SUFFIXES = {".mp4", ".mkv"}
 WHISPER_DEVICES = ("auto", "cpu")
@@ -202,7 +202,7 @@ def process_recording(path: Path, cfg: Config) -> Path:
     print("Transcribing...")
     with progress.band(0.05, 0.60, "Transcribing what you said"):
         segments = transcribe(wav16, cache, cfg.whisper_model, hotwords=cfg.triggers,
-                              language=cfg.language, device=cfg.whisper_device)
+                              language=cfg.language, device=cfg.whisper_device, models=paths.models)
     release()  # frees the GPU before Ollama is asked anything
 
     print("Measuring loudness...")
@@ -407,11 +407,11 @@ def check(cfg: Config) -> int:
     if cfg.whisper_device == "cpu":
         _line("info", "whisper_device: cpu in config.yaml, so whisper transcribes on the CPU and the GPU is not checked")
     else:
-        usable, reason = gpu_ready()
-        if usable:
-            _line("ok", f"CUDA for whisper (whisper_device: auto): {reason}")
+        engine, reason = pick_engine(cfg.whisper_device, cfg.paths.models)
+        if engine == "cpu":
+            _line("info", f"Whisper will transcribe on the CPU, which is slower: {reason}")
         else:
-            _line("info", f"Whisper will transcribe on the CPU, which is slower (whisper_device: auto): {reason}")
+            _line("ok", f"Whisper transcribes on the {reason}")
 
     if cfg.llm_model == "none":
         _line("info", "AI titles are turned off (llm model is \"none\" in config.yaml)")

@@ -1,3 +1,4 @@
+import pytest
 import shutil
 import subprocess
 import time
@@ -170,15 +171,20 @@ def test_process_recording_passes_language_and_device_to_whisper(fake_pipeline, 
 
 def test_check_with_whisper_device_cpu_skips_the_gpu(cfg, monkeypatch, capsys):
     cfg.whisper_device = "cpu"
-    monkeypatch.setattr(cli, "gpu_ready", lambda: (_ for _ in ()).throw(AssertionError("GPU checked")))
+    monkeypatch.setattr(cli, "pick_engine", lambda *a: (_ for _ in ()).throw(AssertionError("GPU checked")))
     check(cfg)
     assert "whisper_device: cpu" in capsys.readouterr().out
 
 
-def test_check_prints_whisper_device_auto(cfg, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "gpu_ready", lambda: (False, "no NVIDIA GPU with a working driver was found"))
+@pytest.mark.parametrize("engine,reason,expected", [
+    ("cuda", "NVIDIA graphics card (faster-whisper)", "transcribes on the NVIDIA graphics card"),
+    ("whisper.cpp", "graphics card through Vulkan (whisper.cpp)", "transcribes on the graphics card through Vulkan"),
+    ("cpu", "no NVIDIA GPU with a working driver was found", "on the CPU, which is slower"),
+])
+def test_check_says_which_engine_transcribes(cfg, monkeypatch, capsys, engine, reason, expected):
+    monkeypatch.setattr(cli, "pick_engine", lambda *a: (engine, reason))
     check(cfg)
-    assert "whisper_device: auto" in capsys.readouterr().out
+    assert expected in capsys.readouterr().out
 
 
 def test_bad_whisper_device_is_a_config_error(tmp_path, capsys):
