@@ -1,2 +1,479 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>TeddyClip editor</title></head><body></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeddyClip editor</title>
+<style>
+  :root {
+    --paper: #f3ead8; --card: #fbf6ec; --card-2: #f6eedf; --line: #d8c7a8; --walnut: #5b3d29;
+    --ink: #2e231b; --muted: #7d6a58; --orange: #d4612a; --orange-dark: #b44e1d;
+    --mustard: #d9a227; --teal: #2b7a74; --avocado: #6f7d2c; --plum: #7b4a6e; --cream: #fff9ee;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); display: flex; flex-direction: column;
+         font: 15px/1.5 "Century Gothic", Futura, "Jost", "Trebuchet MS", sans-serif; }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; flex-wrap: wrap; }
+  .bar h1 { margin: 0; font-size: 20px; color: var(--walnut); overflow-wrap: anywhere; }
+  .spacer { flex: 1; }
+  .stripes { height: 6px; flex: none; background: linear-gradient(90deg, var(--orange) 0 40%, var(--mustard) 40% 70%, var(--teal) 70% 88%, var(--avocado) 88%); }
+  button { font: inherit; border: 2px solid var(--walnut); background: var(--cream); color: var(--walnut);
+           padding: 6px 16px; border-radius: 999px; cursor: pointer; font-weight: 600; letter-spacing: .3px;
+           transition: transform .08s ease, box-shadow .08s ease; }
+  button:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 2px 2px 0 var(--walnut); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--orange); border-color: var(--orange-dark); color: var(--cream); }
+  button.primary:hover:not(:disabled) { box-shadow: 2px 2px 0 var(--orange-dark); }
+  button.small { padding: 3px 12px; font-size: 13px; border-width: 1.5px; }
+  .muted { color: var(--muted); }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr); gap: 18px;
+         padding: 16px 20px 20px; }
+  .left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  video { width: 100%; max-height: 58vh; aspect-ratio: 16 / 9; background: #1f1712; border-radius: 14px; display: block; }
+  .label { font-size: 13px; color: var(--muted); display: flex; gap: 10px; align-items: baseline; }
+  .label b { color: var(--ink); font-size: 15px; }
+  .strip { position: relative; height: 34px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--card);
+           overflow: hidden; cursor: pointer; touch-action: none; }
+  .strip canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #zoom { height: 52px; }
+  .sel { position: absolute; top: 0; bottom: 0; background: rgba(217, 162, 39, .28); border-left: 0; border-right: 0; }
+  .handle { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; cursor: ew-resize; z-index: 2; }
+  .handle::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 6px; border-radius: 3px;
+                   background: var(--orange); box-shadow: 0 0 0 1.5px var(--cream); }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--walnut); z-index: 1;
+              pointer-events: none; }
+  .edge { position: absolute; bottom: 2px; font-size: 11px; color: var(--muted); pointer-events: none; z-index: 1; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row .group { display: flex; align-items: center; gap: 6px; }
+  .make { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-radius: 14px;
+          background: var(--card); border: 1.5px solid var(--line); }
+  .make input { flex: 1; min-width: 180px; font: inherit; padding: 7px 14px; border-radius: 999px;
+                border: 1.5px solid var(--line); background: var(--cream); color: var(--ink); }
+  .make input:focus, #search:focus { outline: none; border-color: var(--orange); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+  aside { display: flex; flex-direction: column; min-height: 0; background: var(--card); border: 1.5px solid var(--line);
+          border-radius: 18px; padding: 12px; gap: 8px; }
+  #search { font: inherit; padding: 7px 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--cream);
+            color: var(--ink); width: 100%; }
+  #hits { font-size: 12px; min-height: 18px; }
+  #lines { flex: 1; min-height: 200px; overflow-y: auto; font-size: 14px; padding-right: 4px; }
+  .line { display: flex; gap: 8px; padding: 3px 8px; border-radius: 8px; cursor: pointer; border-left: 3px solid transparent; }
+  .line:hover { background: var(--card-2); }
+  .line .t { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; min-width: 52px; padding-top: 2px; }
+  .line.in { background: rgba(217, 162, 39, .2); }
+  .line.now { border-left-color: var(--walnut); }
+  .line .cue { font-size: 11px; font-weight: 700; margin-left: 6px; white-space: nowrap; }
+  .cue.laugh { color: #a5780f; } .cue.yell { color: var(--plum); }
+  mark { background: rgba(212, 97, 42, .3); color: inherit; border-radius: 3px; }
+  .here { display: flex; gap: 8px; flex-wrap: wrap; }
+  .notice { padding: 14px 16px; border-radius: 14px; background: var(--card); border: 1.5px solid var(--orange); }
+  .notice[hidden] { display: none; }
+  dialog { border: none; border-radius: 22px; padding: 24px 26px 20px; max-width: 460px; background: var(--card);
+           color: var(--ink); box-shadow: 6px 6px 0 var(--walnut); }
+  dialog::backdrop { background: rgba(46, 35, 27, .45); }
+  dialog p { margin: 0 0 16px; }
+  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--walnut); color: var(--cream);
+           padding: 9px 18px; border-radius: 999px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } #lines { max-height: 50vh; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button id="back" title="Back to all sessions">Back</button>
+  <h1 id="name">Loading...</h1>
+  <span class="spacer"></span>
+  <button id="prev" class="small" aria-label="Previous suggestion">&lsaquo;</button>
+  <span id="which" class="muted"></span>
+  <button id="next" class="small" aria-label="Next suggestion">&rsaquo;</button>
+</div>
+<div class="stripes"></div>
+<main>
+  <section class="left">
+    <div id="missing" class="notice" hidden>
+      <b>The recording for this session is missing.</b>
+      <div class="muted" id="missing-path"></div>
+      <div style="margin-top:8px"><button class="small" id="open-done">Open Finished recordings</button></div>
+    </div>
+    <video id="video" controls preload="auto"></video>
+    <div class="label">Whole recording <span>click to jump</span></div>
+    <div class="strip" id="overview"><canvas></canvas><div class="playhead" id="ov-play"></div></div>
+    <div class="label"><b id="range-text"></b></div>
+    <div class="strip" id="zoom">
+      <canvas></canvas>
+      <div class="sel" id="sel"></div>
+      <div class="handle" id="h-start" title="Drag to move the start"></div>
+      <div class="handle" id="h-end" title="Drag to move the end"></div>
+      <div class="playhead" id="z-play"></div>
+      <span class="edge" id="z-left" style="left:6px"></span>
+      <span class="edge" id="z-right" style="right:6px"></span>
+    </div>
+    <div class="row">
+      <div class="group"><span class="muted">Start</span>
+        <button class="small" data-nudge="start" data-by="-5">-5s</button>
+        <button class="small" data-nudge="start" data-by="5">+5s</button></div>
+      <div class="group"><span class="muted">End</span>
+        <button class="small" data-nudge="end" data-by="-5">-5s</button>
+        <button class="small" data-nudge="end" data-by="5">+5s</button></div>
+      <span class="spacer"></span>
+      <button id="play-clip">Play clip</button>
+    </div>
+    <div class="make">
+      <input id="title" maxlength="80" placeholder="Name this clip" aria-label="Clip title">
+      <button id="create" class="primary">Create clip</button>
+    </div>
+    <div class="legend">
+      <span><span class="sw" style="background:rgba(212,97,42,.45)"></span>suggested clip</span>
+      <span><span class="sw" style="background:rgba(43,122,116,.6)"></span>clip made</span>
+      <span><span class="sw" style="background:var(--mustard)"></span>laughter</span>
+      <span><span class="sw" style="background:var(--plum)"></span>yelling</span>
+    </div>
+  </section>
+  <aside>
+    <input id="search" type="search" placeholder="Search what was said" autocomplete="off">
+    <div id="hits" class="muted"></div>
+    <div id="lines"></div>
+    <div class="here">
+      <button class="small" id="start-here" title="Start the clip where the video is now">Start clip here</button>
+      <button class="small" id="end-here" title="End the clip where the video is now">End clip here</button>
+    </div>
+  </aside>
+</main>
+<dialog id="msg"><p id="msg-text"></p><div style="text-align:right"><button id="msg-ok" class="primary">OK</button></div></dialog>
+<div id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const params = new URLSearchParams(location.search);
+const NAME = params.get("session") || "";
+const PAD = 20;          // seconds shown either side of the clip in the zoomed strip
+const MIN_LEN = 1;       // seconds
+const FIRST = {trigger: 0, marker: 0};
+const video = $("video");
+
+let data = null, items = [], index = -1;
+let start = 0, end = 30, replace = null, suggestion = null;
+let zoomFrom = 0, zoomTo = 70, stopAt = null, userScrolled = 0, nowLine = -1;
+
+function clock(t) {
+  t = Math.max(0, Math.round(t));
+  const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function message(text) {
+  $("msg-text").textContent = text;
+  $("msg").showModal();
+}
+$("msg-ok").onclick = () => $("msg").close();
+
+let toastTimer = 0;
+function toast(text) {
+  $("toast").textContent = text;
+  $("toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $("toast").classList.remove("show"), 3500);
+}
+
+async function load() {
+  const r = await fetch(`/api/session/${encodeURIComponent(NAME)}`, {cache: "no-store"});
+  if (!r.ok) {
+    $("name").textContent = "This session is gone";
+    message("TeddyClip could not find this session. Go back and pick it again.");
+    return false;
+  }
+  data = await r.json();
+  return true;
+}
+
+function madeFor(id) {
+  return (data.made || []).find((m) => m.suggestion === id && m.exists);
+}
+
+function setRange(a, b, keepZoom) {
+  const dur = data.duration;
+  a = Math.max(0, Math.min(a, dur - MIN_LEN));
+  b = Math.max(a + MIN_LEN, Math.min(b, dur));
+  start = Math.round(a * 10) / 10;
+  end = Math.round(b * 10) / 10;
+  if (!keepZoom) { zoomFrom = Math.max(0, start - PAD); zoomTo = Math.min(dur, end + PAD); }
+  draw();
+}
+
+function openItem(i) {
+  index = i;
+  const s = items[i];
+  const made = s ? madeFor(s.id) : null;
+  if (made) {
+    replace = made.file; suggestion = s.id; $("title").value = made.title;
+    setRange(made.start, made.end);
+  } else if (s) {
+    replace = null; suggestion = s.id; $("title").value = s.title;
+    setRange(s.start, s.end);
+  }
+  video.currentTime = start;
+}
+
+function openClip(file) {
+  const made = (data.made || []).find((m) => m.file === file);
+  if (!made) return false;
+  replace = made.file; suggestion = made.suggestion ?? null; $("title").value = made.title;
+  index = items.findIndex((s) => s.id === suggestion);
+  setRange(made.start, made.end);
+  video.currentTime = start;
+  return true;
+}
+
+function draw() {
+  $("which").textContent = items.length
+    ? (index >= 0 ? `Suggestion ${index + 1} of ${items.length}` : `${items.length} suggestions`) : "No suggestions";
+  $("prev").disabled = !items.length; $("next").disabled = !items.length;
+  $("range-text").textContent = `This clip: ${clock(start)} to ${clock(end)} · ${clock(end - start)} long`;
+  $("create").textContent = replace ? "Update clip" : "Create clip";
+  drawStrip($("overview"), 0, data.duration, true);
+  drawStrip($("zoom"), zoomFrom, zoomTo, false);
+  const span = zoomTo - zoomFrom || 1, pct = (t) => `${((t - zoomFrom) / span) * 100}%`;
+  $("sel").style.left = pct(start);
+  $("sel").style.width = `${((end - start) / span) * 100}%`;
+  $("h-start").style.left = pct(start);
+  $("h-end").style.left = pct(end);
+  $("z-left").textContent = clock(zoomFrom);
+  $("z-right").textContent = clock(zoomTo);
+  markLines();
+  playheads();
+}
+
+// One canvas per strip: suggested and made clips as blocks, yelling hanging
+// from the top and laughter rising from the bottom, the largest value in each pixel.
+function drawStrip(strip, from, to, whole) {
+  const canvas = strip.querySelector("canvas");
+  const ratio = window.devicePixelRatio || 1, w = strip.clientWidth, h = strip.clientHeight;
+  canvas.width = Math.max(1, Math.round(w * ratio)); canvas.height = Math.max(1, Math.round(h * ratio));
+  const g = canvas.getContext("2d");
+  g.scale(ratio, ratio);
+  g.clearRect(0, 0, w, h);
+  const span = to - from || 1, x = (t) => ((t - from) / span) * w;
+  g.fillStyle = "rgba(212, 97, 42, .32)";
+  for (const s of items) if (s.end > from && s.start < to) g.fillRect(x(s.start), 0, Math.max(2, x(s.end) - x(s.start)), h);
+  g.fillStyle = "rgba(43, 122, 116, .45)";
+  for (const m of data.made || []) if (m.exists && m.end > from && m.start < to) g.fillRect(x(m.start), h * .3, Math.max(2, x(m.end) - x(m.start)), h * .4);
+  const lane = (values, color, top) => {
+    g.fillStyle = color;
+    for (let px = 0; px < w; px++) {
+      const a = Math.floor(from + (px / w) * span), b = Math.max(a + 1, Math.ceil(from + ((px + 1) / w) * span));
+      let v = 0;
+      for (let t = a; t < b && t < values.length; t++) v = Math.max(v, values[t] || 0);
+      if (v < 0.15) continue;
+      const len = v * h * 0.45;
+      g.fillRect(px, top ? 0 : h - len, 1, len);
+    }
+  };
+  lane(data.cues.yelling || [], "#7b4a6e", true);
+  lane(data.cues.laughter || [], "#d9a227", false);
+  if (whole) {
+    g.strokeStyle = "#5b3d29"; g.lineWidth = 2;
+    g.strokeRect(x(start), 1, Math.max(2, x(end) - x(start)), h - 2);
+  }
+}
+
+function playheads() {
+  const t = video.currentTime || 0;
+  $("ov-play").style.left = `${(t / (data.duration || 1)) * 100}%`;
+  const zp = $("z-play"), inside = t >= zoomFrom && t <= zoomTo;
+  zp.style.display = inside ? "" : "none";
+  if (inside) zp.style.left = `${((t - zoomFrom) / ((zoomTo - zoomFrom) || 1)) * 100}%`;
+}
+
+// Transcript
+
+function cueFor(seg) {
+  const a = Math.floor(seg.start), b = Math.max(a + 1, Math.ceil(seg.end));
+  let laugh = 0, yell = 0;
+  for (let t = a; t < b; t++) {
+    laugh = Math.max(laugh, data.cues.laughter[t] || 0);
+    yell = Math.max(yell, data.cues.yelling[t] || 0);
+  }
+  return (laugh >= 0.5 ? '<span class="cue laugh">laughter</span>' : "") + (yell >= 0.5 ? '<span class="cue yell">yelling</span>' : "");
+}
+
+function renderLines(query) {
+  const q = query.trim().toLowerCase();
+  let hits = 0;
+  $("lines").innerHTML = data.segments.map((seg, i) => {
+    let text = esc(seg.text);
+    if (q) {
+      const at = seg.text.toLowerCase().indexOf(q);
+      if (at >= 0) {
+        hits++;
+        text = esc(seg.text.slice(0, at)) + "<mark>" + esc(seg.text.slice(at, at + q.length)) + "</mark>" + esc(seg.text.slice(at + q.length));
+      }
+    }
+    return `<div class="line" data-i="${i}"><span class="t">${clock(seg.start)}</span><span>${text}${cueFor(seg)}</span></div>`;
+  }).join("") || '<div class="muted">Nothing was transcribed in this recording.</div>';
+  $("hits").textContent = q ? (hits ? `${hits} match${hits === 1 ? "" : "es"}. Press Enter for the next one.` : "No matches.") : "";
+  nowLine = -1;
+  markLines();
+}
+
+function markLines() {
+  if (!data) return;
+  const lines = $("lines").children;
+  data.segments.forEach((seg, i) => lines[i] && lines[i].classList.toggle("in", seg.end > start && seg.start < end));
+}
+
+function lineAt(t) {
+  let lo = 0, hi = data.segments.length - 1, found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (data.segments[mid].start <= t) { found = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return found;
+}
+
+function follow() {
+  const i = lineAt(video.currentTime || 0), lines = $("lines").children;
+  if (i === nowLine) return;
+  if (lines[nowLine]) lines[nowLine].classList.remove("now");
+  nowLine = i;
+  if (lines[i]) {
+    lines[i].classList.add("now");
+    if (Date.now() - userScrolled > 4000) lines[i].scrollIntoView({block: "center"});
+  }
+}
+
+$("lines").addEventListener("wheel", () => (userScrolled = Date.now()), {passive: true});
+$("lines").addEventListener("click", (e) => {
+  const line = e.target.closest(".line");
+  if (line) { video.currentTime = data.segments[+line.dataset.i].start; userScrolled = 0; }
+});
+$("search").addEventListener("input", () => renderLines($("search").value));
+$("search").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { $("search").value = ""; renderLines(""); return; }
+  if (e.key !== "Enter") return;
+  const marks = [...$("lines").querySelectorAll("mark")];
+  if (!marks.length) return;
+  const now = video.currentTime || 0;
+  const next = marks.find((m) => data.segments[+m.closest(".line").dataset.i].start > now + 0.5) || marks[0];
+  const seg = data.segments[+next.closest(".line").dataset.i];
+  video.currentTime = seg.start;
+  userScrolled = 0;
+  next.closest(".line").scrollIntoView({block: "center"});
+});
+
+// Strips: click to jump, drag the edges
+
+function timeAt(strip, clientX, from, to) {
+  const r = strip.getBoundingClientRect();
+  return from + Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * (to - from);
+}
+
+$("overview").addEventListener("pointerdown", (e) => {
+  video.currentTime = timeAt($("overview"), e.clientX, 0, data.duration);
+});
+
+let dragging = null;
+for (const [id, which] of [["h-start", "start"], ["h-end", "end"]]) {
+  $(id).addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    dragging = which;
+    $(id).setPointerCapture(e.pointerId);
+  });
+  $(id).addEventListener("pointermove", (e) => {
+    if (dragging !== which) return;
+    const t = timeAt($("zoom"), e.clientX, zoomFrom, zoomTo);
+    if (which === "start") setRange(Math.min(t, end - MIN_LEN), end, true);
+    else setRange(start, Math.max(t, start + MIN_LEN), true);
+    video.currentTime = which === "start" ? start : end;
+  });
+  $(id).addEventListener("pointerup", () => {
+    dragging = null;
+    setRange(start, end, false);  // re-centre the zoomed strip on the new clip
+  });
+}
+$("zoom").addEventListener("pointerdown", (e) => {
+  if (e.target.classList.contains("handle")) return;
+  video.currentTime = timeAt($("zoom"), e.clientX, zoomFrom, zoomTo);
+});
+
+document.querySelectorAll("[data-nudge]").forEach((b) => b.addEventListener("click", () => {
+  const by = +b.dataset.by;
+  if (b.dataset.nudge === "start") { setRange(start + by, end); video.currentTime = start; }
+  else { setRange(start, end + by); video.currentTime = Math.max(start, end - 5); }
+}));
+
+$("start-here").onclick = () => setRange(Math.min(video.currentTime, end - MIN_LEN), end);
+$("end-here").onclick = () => setRange(start, Math.max(video.currentTime, start + MIN_LEN));
+
+$("play-clip").onclick = () => {
+  video.currentTime = start;
+  stopAt = end;
+  video.play();
+};
+
+function tick() {
+  if (data) {
+    if (stopAt !== null && video.currentTime >= stopAt) { video.pause(); stopAt = null; }
+    playheads();
+    follow();
+  }
+  requestAnimationFrame(tick);
+}
+video.addEventListener("pause", () => (stopAt = null));
+video.addEventListener("seeking", () => { if (stopAt !== null && (video.currentTime < start - 0.5 || video.currentTime > end)) stopAt = null; });
+
+// Making the clip
+
+$("create").onclick = async () => {
+  const button = $("create"), label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Cutting...";
+  try {
+    const r = await fetch("/api/cut", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session: NAME, start, end, title: $("title").value, replace, suggestion})});
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) { message(body.error || "The clip could not be made."); return; }
+    replace = body.file;
+    await load();
+    toast(`Saved "${body.file}" in 2 - Clips`);
+  } catch (e) {
+    message("TeddyClip is not running. Open it again from the desktop shortcut.");
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+    if (data) draw();
+  }
+};
+
+$("prev").onclick = () => items.length && openItem(index <= 0 ? items.length - 1 : index - 1);
+$("next").onclick = () => items.length && openItem(index < 0 || index >= items.length - 1 ? 0 : index + 1);
+$("back").onclick = () => (location.href = "/");
+$("open-done").onclick = () => fetch("/api/open", {method: "POST", headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({folder: "done"})});
+window.addEventListener("resize", () => data && draw());
+
+(async () => {
+  if (!await load()) return;
+  document.title = `${data.name} - TeddyClip`;
+  $("name").textContent = data.name;
+  items = [...data.suggestions].sort((a, b) => ((FIRST[a.kind] ?? 1) - (FIRST[b.kind] ?? 1)) || (a.start - b.start));
+  if (!data.recording_ok) {
+    $("missing").hidden = false;
+    $("missing-path").textContent = data.preview || data.recording;
+  }
+  video.src = data.recording_url;
+  renderLines("");
+  const wanted = +params.get("s");
+  const clip = params.get("clip");
+  if (!(clip && openClip(clip))) {
+    const i = items.findIndex((s) => s.id === wanted);
+    if (i >= 0) openItem(i);
+    else if (items.length) openItem(0);
+    else { $("title").value = ""; setRange(0, Math.min(30, data.duration)); }
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
