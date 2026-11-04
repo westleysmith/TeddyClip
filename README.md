@@ -15,8 +15,9 @@ TeddyClip is a personal auto-clipper for long gaming recordings with commentary.
    - Laughing, shouting, and outbursts where your voice stays loud for a few seconds. Each clip reaches back about 40 seconds so it includes the setup, not just the reaction.
    - Optional per-game screen detectors (for example a "YOU DIED" screen), chosen by the game folder name.
 3. **Pick moments** with a small local AI model (via Ollama) that finds quiet jokes in the transcript and titles each moment. No cloud, no cost. If Ollama is not running, TeddyClip carries on without AI titles.
-4. **Cut clips** named by timestamp and what happened, write a `moments.csv` and a DaVinci Resolve marker file, then move the original recording to `Done` with chapters added.
-5. **Review** by deleting the clips you don't want, then build a highlight video with YouTube chapters.
+4. **Suggest clips.** Nothing is cut yet. The original recording moves to `4 - Finished recordings`, and each suggestion is listed in the TeddyClip window.
+5. **Review in the editor.** Click a suggestion to watch the original recording with the transcript beside it (searchable, with laughter and yelling marked). Move the clip's start and end until it starts where the moment really starts, then click **Create clip**. You can also make a clip anywhere in the recording, for example a moment you find by searching the transcript.
+6. **Highlight video:** join the clips you made into one video with YouTube chapters.
 
 TeddyClip uses the graphics card when it can, whatever the brand: transcription runs on NVIDIA cards with faster-whisper and on AMD and Intel graphics with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) through Vulkan, and clips are cut with the card's video encoder (NVIDIA NVENC, AMD AMF or Intel Quick Sync). Without a usable graphics card everything still works on the CPU, more slowly.
 
@@ -74,40 +75,39 @@ The first real run downloads the whisper speech model and the laughter and shout
 
 1. Record your session in OBS. Set it up once using the [OBS setup guide](docs/obs-setup.md). While you play, say **"clip that"** out loud whenever something is worth keeping. Every one of those moments is guaranteed a clip.
 2. Double-click **TeddyClip** on the desktop or in the Start menu. It opens in its own window. Close the window when you are done; that quits TeddyClip. (Prefer your web browser? `Open TeddyClip.bat` in the app folder shows the same page there.)
-3. Click **Add recordings** and put your recordings in the folder that opens (`1 Inbox`). You can drop them straight in, or inside a folder named after the game (for example `1 Inbox\Elden Ring`). The folder name is used in the clip folder name, and for some games it turns on screen-text detection such as YOU DIED.
-4. Click **Make clips**. The page shows what it is doing. A 4 hour session takes a while, so leave it running. Recordings OBS is still writing are left alone.
-5. Watch the clips on the page and click **Delete** on the ones you don't want (they go to the Recycle Bin, so nothing is lost by accident).
-6. Click **Make highlight**. The clips you kept are joined in time order into `3 Highlights`, with a YouTube chapters file next to it, and the highlight appears on the page.
+3. Click **Add recordings**, pick your recordings and say which game they are. They move into `1 - Raw recordings\<game>`. The game name is used in the session name, and for some games it turns on screen-text detection such as YOU DIED.
+4. Tick the recordings you want and click **Find clips**. The page shows what it is doing. A 4 hour session takes a while, so leave it running. Recordings OBS is still writing are left alone.
+5. Each session then lists its suggested clips. Click **Review** on one to open the editor: the recording plays on the left, the transcript follows along on the right, and the strips under the video show every suggestion plus laughter and yelling. Drag the clip's edges (or use the -5s and +5s buttons), press **Play clip** to check it, name it, and click **Create clip**. The arrows at the top step through the suggestions. Clips you made can be opened again with **Edit** and updated.
+6. Click **Make highlight**. The clips you made are joined in time order into `3 - Highlight videos`, with a YouTube chapters file next to it, and the highlight appears on the page.
 
-**Hands-free:** point OBS's recording folder at `1 - Raw recordings` and turn on **Make clips automatically** in the window, with the game you are playing. Recordings are then clipped as soon as OBS finishes them, while the TeddyClip window is open. See the [OBS setup guide](docs/obs-setup.md).
+**Hands-free:** point OBS's recording folder at `1 - Raw recordings` and turn on **Find clips automatically** in the window, with the game you are playing. Each recording is then analyzed as soon as OBS finishes it, while the TeddyClip window is open, and its suggestions are waiting for you. See the [OBS setup guide](docs/obs-setup.md).
 
-Prefer no browser? `TeddyClip.bat` does step 4 in a console window, and dragging a clip folder onto `Highlight.bat` does step 6.
+Prefer no window? `TeddyClip.bat` finds clips in a console window and cuts every suggestion straight away (there is no editor there), and dragging a clip folder onto `Highlight.bat` does step 6. On the command line, `teddyclip --cut-all` does the same.
 
 ### What gets made
 
 ```
 TeddyClip\                            created on first run, default C:\Users\<you>\TeddyClip
-  1 Inbox\
+  1 - Raw recordings\
      Elden Ring\                      subfolder name = game (optional)
         2026-11-01 20-14-03.mp4
-  2 Clips\
-     2026-11-01 Elden Ring\
+  2 - Clips\
+     2026-11-01 Elden Ring\           one folder per session, only the clips you made
         0h12m40s - Teddy gets ganked by dogs.mp4
-        1h03m15s - Clip that - Malenia rage quit.mp4
-        moments.csv
-        Resolve markers.edl
-  3 Highlights\
+        1h03m15s - Malenia rage quit.mp4
+  3 - Highlight videos\
      2026-11-01 Elden Ring.mp4
      2026-11-01 Elden Ring - chapters.txt
-  Done\
-     2026-11-01 Elden Ring.mp4        the original, with chapters added
-  .cache\                             transcripts, AI answers, model files
+  4 - Finished recordings\
+     2026-11-01 Elden Ring.mp4        the original, which the editor plays
+  .cache\                             transcripts, suggestions, AI answers, model files
 ```
 
-- **Clips** are named `<hours>h<minutes>m<seconds>s - <title>.mp4` after where they start in the recording. Clips that came from saying "clip that" have `Clip that - ` in front of the title. Clips from an OBS marker key have no prefix, but their `kind` in `moments.csv` is `marker`.
-- **`moments.csv`** lists every moment TeddyClip found, including the ones it did not turn into clips. Open it in Excel. The `keep` column says yes or no, `score` is how strong the moment is, `why` explains the pick, and `file` is the clip's file name. This is the place to look when a clip surprised you, or to find a good moment that was left out.
-- **`Resolve markers.edl`** puts every clip as a colored marker on your full recording in DaVinci Resolve (red for "clip that" and OBS markers, yellow for laughter, blue for jokes, purple for game screen text, green for loud moments). To use it, put the original recording from `Done` on a timeline starting at 01:00:00:00 (Resolve's default), then in the Media Pool right-click the timeline and choose Timelines > Import > Timeline Markers from EDL. The marker name is the clip title. The marker file has no room for the reason, so the reason is only in `moments.csv`.
-- **The original** is moved from the inbox to `Done` with chapters added, one per kept moment, so you can jump between them in a video player. It keeps its file type (an `.mkv` stays `.mkv`). The inbox copy is only removed once the new copy is checked to be the same length.
+- **Clips** are named `<hours>h<minutes>m<seconds>s - <title>.mp4` after where they start in the recording, with the title you gave them in the editor. ("Clip that" moments and OBS marker moments are suggestions like the rest, listed first.)
+- **`.cache\sessions\<session>\session.json`** is TeddyClip's own record of a session: the transcript, laughter and yelling per second, the suggestions, and the clips made from them. The editor reads it.
+- **`moments.csv`** (next to `session.json`) lists every moment TeddyClip found, including the ones it did not suggest. Open it in Excel. The `keep` column says yes or no, `score` is how strong the moment is, `why` explains the pick, and `file` is the clip's file name. This is the place to look when a clip surprised you, or to find a good moment that was left out.
+- **`Resolve markers.edl`** (only when `resolve_markers` is on in `config.yaml`) puts every suggestion as a colored marker on your full recording in DaVinci Resolve (red for "clip that" and OBS markers, yellow for laughter, blue for jokes, purple for game screen text, green for loud moments). To use it, put the original recording from `4 - Finished recordings` on a timeline starting at 01:00:00:00 (Resolve's default), then in the Media Pool right-click the timeline and choose Timelines > Import > Timeline Markers from EDL. The marker name is the clip title. The marker file has no room for the reason, so the reason is only in `moments.csv`.
+- **The original** is moved from `1 - Raw recordings` to `4 - Finished recordings` as it is. An `.mkv` is copied into an `.mp4` instead (no quality lost), because the TeddyClip window cannot play `.mkv`, and the `.mkv` is only removed once the copy is checked to be the same length. If the recording uses a video format the window cannot play (H.265 or AV1 from some graphics cards), TeddyClip also makes a smaller preview copy for the editor; clips are still cut from the original.
 - **The highlight video** joins the clips without re-encoding, so it keeps the recording's resolution and quality. `chapters.txt` is a list you can paste into a YouTube description. YouTube only accepts it with at least 3 chapters that are each at least 10 seconds long; if that is not true the file says so instead.
 
 ## Settings
@@ -116,7 +116,7 @@ Everything works with no changes except the names. The settings are in `config.y
 
 | Setting | What it does |
 |---|---|
-| `root` | Where `1 Inbox`, `2 Clips`, `3 Highlights` and `Done` live. Default `C:\Users\{user}\TeddyClip`. |
+| `root` | Where `1 - Raw recordings`, `2 - Clips`, `3 - Highlight videos` and `4 - Finished recordings` live. Default `C:\Users\{user}\TeddyClip`. |
 | `people` | The names used in clip titles. Change `Friend` to your friend's real name. |
 | `triggers` | The phrases that always make a clip. Add any variants the transcript mishears. |
 | `audio_track` | Which OBS audio track holds your microphones (for example `2`). Leave as `null` to use track 1. See the [OBS setup guide](docs/obs-setup.md). |
@@ -132,7 +132,7 @@ Everything works with no changes except the names. The settings are in `config.y
 ## Troubleshooting
 
 - **`teddyclip check` says ffmpeg is not found.** Close the window and open a new one after `winget install Gyan.FFmpeg`. If it still fails, restart the PC.
-- **A recording failed.** It stays in `1 Inbox`. The message on screen says why. Fix it and run `TeddyClip.bat` again.
+- **A recording failed.** It stays in `1 - Raw recordings`. The message on screen says why. Fix it and click **Find clips** again.
 - **"has no sound track."** OBS recorded that file without audio. See the audio track part of the [OBS setup guide](docs/obs-setup.md) and record again.
 - **A run crashes during transcription on a GPU PC.** Set `whisper_device: cpu` in `config.yaml` and run it again. Transcribing is slower on the CPU, but everything else is the same.
 - **Nothing happens for a recording.** TeddyClip waits until OBS (or a copy) has let go of a file and it has not changed for 10 seconds. Wait a moment and try again.

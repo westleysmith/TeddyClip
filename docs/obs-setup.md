@@ -9,7 +9,7 @@ Point OBS at TeddyClip's Raw recordings folder so recordings land there on their
 1. Open OBS, then Settings > Output.
 2. Under Recording, set **Recording Path** to:
    `C:\Users\<you>\TeddyClip\1 - Raw recordings`
-3. In TeddyClip, turn on **Make clips automatically** and type the game you are playing in **Game for new recordings**. Each recording is then clipped as soon as OBS finishes it, filed under that game. The game name switches on screen-text detection (Elden Ring and Dark Souls look for YOU DIED, GTA and Red Dead for WASTED, Counter-Strike for ROUND WON, and so on); change it when you switch games.
+3. In TeddyClip, turn on **Find clips automatically** and type the game you are playing in **Game for new recordings**. Each recording is then analyzed as soon as OBS finishes it, filed under that game, and its suggested clips wait for you in the window. The game name switches on screen-text detection (Elden Ring and Dark Souls look for YOU DIED, GTA and Red Dead for WASTED, Counter-Strike for ROUND WON, and so on); change it when you switch games.
 
 Automatic mode waits while any recording in that folder is still being written, so it does not slow your game down while you are still recording. It works while the TeddyClip window is open.
 
@@ -58,4 +58,4 @@ If a recording has no track 2, TeddyClip falls back to track 1. If a recording h
 
 ## A quick test
 
-Record 30 seconds, say "clip that" once, and stop. If OBS records into `1 - Raw recordings`, it shows up in TeddyClip by itself; otherwise use **Add recordings**. Click **Make clips** (or let automatic mode start it). A recording that short will not give much, but it shows that the path, the audio and the folders are all working before you record a whole session.
+Record 30 seconds, say "clip that" once, and stop. If OBS records into `1 - Raw recordings`, it shows up in TeddyClip by itself; otherwise use **Add recordings**. Click **Find clips** (or let automatic mode start it), then review the suggestion in the editor. A recording that short will not give much, but it shows that the path, the audio and the folders are all working before you record a whole session.

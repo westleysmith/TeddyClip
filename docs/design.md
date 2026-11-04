@@ -1,5 +1,7 @@
 # TeddyClip design (v1 MVP)
 
+> **Update 2026-11-04:** Find clips now saves suggestions instead of cutting, and clips are made in an editor that plays the original with its transcript. Folder names are now `1 - Raw recordings`, `2 - Clips`, `3 - Highlight videos` and `4 - Finished recordings`. Where this document says otherwise, [the clip editor spec](superpowers/specs/2026-11-04-clip-editor-design.md) wins.
+
 Date: 2026-11-03. Status: v1 built and tested on synthetic media; tuning on real footage. Sections 3, 4.2, 5, 9, 11 and 12 were updated after the build to match the decisions made along the way.
 
 ## 1. Purpose
@@ -137,7 +139,7 @@ recording
 | Clips | `<h>h<mm>m<ss>s - <title>.mp4` at the recording's own resolution; triggered ones get `Clip that - ` before the title. Frame-accurate re-encode, NVENC with CPU retry, audio loudness-normalized to -14 LUFS, short audio fades. Clips Kitty `cutter.py`, `encoding.py`. |
 | `moments.csv` | Every candidate, kept or not: start, end, score, title, why, signals, file name. Opens in Excel. |
 | `Resolve markers.edl` | Timeline markers as CMX 3600 EDL with Resolve marker comments: duration = moment length, name = title, color by type (red trigger and OBS marker, yellow laughter, blue joke sweep, purple game event, green loud). The marker EDL format has no note field, so the "why" lives only in `moments.csv`. Timeline start (default 01:00:00:00) is in config; the frame rate is read from the recording. Positions use real frame indices, so 59.94 fps footage does not drift. Ours. Must be verified by importing in their Resolve version. |
-| Chapters in original | ffmetadata chapters written during a no-re-encode remux into `Done`, one per kept moment. The file keeps its container extension (`.mkv` stays `.mkv`). Because the container makes chapters gapless, a leading "Start" chapter is added when the first moment starts later than the beginning. Ours. |
+| Filing the original | Moved into `4 - Finished recordings` as it is; an `.mkv` is remuxed to `.mp4` for the editor. The chapter-marker copy was dropped when the editor arrived (see the clip editor spec). Ours. |
 | Highlight video | Remaining clips in `2 Clips\<recording>` joined in time order with a lossless concat at source resolution. It is not scaled to 1920x1080: the clips are all cut from the same recording, so they already match each other (Clips Kitty `assemble.py`, trimmed). |
 | `chapters.txt` | YouTube chapter list obeying YouTube's rules (starts at 0:00, at least 3 chapters, each at least 10 s), or nothing if they cannot be met. Clips Kitty `chapters.py`. |
 
