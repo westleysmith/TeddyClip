@@ -135,7 +135,7 @@ Everything works with no changes except the names. The settings are in `config.y
 - **A recording failed.** It stays in `1 Inbox`. The message on screen says why. Fix it and run `TeddyClip.bat` again.
 - **"has no sound track."** OBS recorded that file without audio. See the audio track part of the [OBS setup guide](docs/obs-setup.md) and record again.
 - **A run crashes during transcription on a GPU PC.** Set `whisper_device: cpu` in `config.yaml` and run it again. Transcribing is slower on the CPU, but everything else is the same.
-- **Nothing happens for a recording.** TeddyClip waits until a file has not changed for 60 seconds, so a recording that just finished may need a minute. Run it again.
+- **Nothing happens for a recording.** TeddyClip waits until OBS (or a copy) has let go of a file and it has not changed for 10 seconds. Wait a moment and try again.
 
 Once you have run a real session, work through the [real-footage checklist](docs/real-footage-checklist.md) to tune it.
 

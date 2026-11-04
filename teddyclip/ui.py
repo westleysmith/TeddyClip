@@ -446,7 +446,7 @@ def make_handler(cfg: Config, job: Job):
                     settings["auto_game"] = game_name(data["auto_game"]) or ""
                 save_settings(cfg, settings)
                 if settings["auto"]:
-                    auto_tick(cfg, job)  # do not wait 30 s for the first look
+                    auto_tick(cfg, job)  # do not wait for the first look
                 return self._json(settings)
             if path in ("/api/archive", "/api/unarchive"):
                 session = _plain_name(data.get("session"))
@@ -505,7 +505,7 @@ def make_server(cfg: Config, port: int = PORT, watch: bool = False) -> Threading
 
 # Automatic mode: make clips as soon as a recording lands in Raw recordings.
 
-AUTO_CHECK_SECONDS = 30
+AUTO_CHECK_SECONDS = 10
 DEFAULT_SETTINGS = {"auto": False, "auto_game": ""}
 
 

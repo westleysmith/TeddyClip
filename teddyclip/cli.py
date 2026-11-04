@@ -54,7 +54,10 @@ from teddyclip.transcribe import all_words, pick_engine, release, transcribe
 
 VIDEO_SUFFIXES = {".mp4", ".mkv"}
 WHISPER_DEVICES = ("auto", "cpu")
-QUIET_SECONDS = 60
+# A recording is left alone until it has not changed for this long. The main
+# guard is the exclusive open in is_finished (OBS and file copies hold the file
+# open while writing); this only covers the gap between their writes.
+QUIET_SECONDS = 10
 
 
 # finding finished recordings

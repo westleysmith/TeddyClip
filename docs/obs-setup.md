@@ -17,7 +17,7 @@ If you would rather sort by hand, set the Recording Path to a folder named after
 
 If you are not sure where the TeddyClip folder is, click **TeddyClip Folders** on the desktop.
 
-TeddyClip only picks up `.mp4` and `.mkv` files, and it waits until OBS has stopped writing a file for 60 seconds before touching it.
+TeddyClip only picks up `.mp4` and `.mkv` files, and it waits until OBS has let go of a file and it has not changed for 10 seconds before touching it.
 
 ## 2. Recording format: Hybrid MP4 (recommended)
 
@@ -58,4 +58,4 @@ If a recording has no track 2, TeddyClip falls back to track 1. If a recording h
 
 ## A quick test
 
-Record 30 seconds, say "clip that" once, stop, and drop the file into `1 Inbox`. Run `TeddyClip.bat`. A recording that short will not give much, but it shows that the path, the audio and the folders are all working before you record a whole session.
+Record 30 seconds, say "clip that" once, and stop. If OBS records into `1 - Raw recordings`, it shows up in TeddyClip by itself; otherwise use **Add recordings**. Click **Make clips** (or let automatic mode start it). A recording that short will not give much, but it shows that the path, the audio and the folders are all working before you record a whole session.

@@ -68,7 +68,7 @@ TeddyClip\
 4. They drag the clip folder onto `Highlight.bat` (which runs `teddyclip highlight "2 Clips\2026-11-01 Elden Ring"`). The remaining clips are joined in order into a highlight video with chapters.
 
 **Rules:**
-- A file is only processed once it has stopped growing for 60 seconds and can be opened exclusively, so a recording in progress is never touched.
+- A file is only processed once it has stopped growing for 10 seconds and can be opened exclusively, so a recording in progress is never touched.
 - The game comes from the inbox subfolder name, then from a keyword in the filename, then falls back to `generic`.
 - Recordings are never deleted. Moving to `Done` with chapters is a remux into `Done` that keeps the original's container extension (an `.mkv` stays `.mkv`); the inbox copy is removed only after the new file's duration matches. On any failure the original stays in the inbox and an error is printed.
 - `teddyclip process <file>` on a file outside the inbox still writes the clips and a copy into `Done`, but leaves the original where it is.
