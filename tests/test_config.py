@@ -64,3 +64,15 @@ def test_pyproject_pins_python_and_the_gpu_libraries():
     assert project["requires-python"] == ">=3.11,<3.13"
     assert "ctranslate2>=4.8,<4.9" in project["dependencies"]
     assert project["optional-dependencies"]["gpu"] == ["nvidia-cublas-cu12", "nvidia-cudnn-cu12==9.10.*"]
+
+
+def test_no_names_unless_set(tmp_path):
+    from teddyclip.config import load_config
+
+    assert load_config(tmp_path / "missing.yaml").people == []
+    old = tmp_path / "old.yaml"
+    old.write_text('people: ["Teddy", "Friend"]\n', encoding="utf-8")  # the old installer's placeholder
+    assert load_config(old).people == []
+    named = tmp_path / "named.yaml"
+    named.write_text("people: [Westley, Teddy]\n", encoding="utf-8")
+    assert load_config(named).people == ["Westley", "Teddy"]

@@ -33,10 +33,11 @@ teddyclip = "teddyclip.cli:main"
 teddyclip-app = "teddyclip.app:main"
 
 [tool.setuptools]
-packages = ["teddyclip"]
+packages = ["teddyclip", "teddyclip.fonts"]
 
 [tool.setuptools.package-data]
-teddyclip = ["ui.html", "editor.html", "teddyclip.ico", "fonts/*"]
+teddyclip = ["ui.html", "editor.html", "teddyclip.ico"]
+"teddyclip.fonts" = ["*.ttf", "*.txt"]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not slow'"

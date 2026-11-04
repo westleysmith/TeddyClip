@@ -1,4 +1,4 @@
-You are labeling one candidate clip from a long recording of friends playing video games together on a couch. The people playing are: {people}. They tease each other and share in-jokes. Nobody is performing for an audience.
+You are labeling one candidate clip from a long recording of friends playing video games together on a couch. {who} They tease each other and share in-jokes. Nobody is performing for an audience.
 
 Below is the transcript of the candidate clip, one line per stretch of speech, formatted as:
 [start - end] spoken text
@@ -10,7 +10,7 @@ A mild-sounding line that lines up with big laughter or a shout is often a great
 Judge it as a clip for the friends to rewatch and share with each other, not for strangers. Reward funny exchanges, roasts, callbacks, ridiculous game moments and real reactions. Do not reward noise with nothing behind it.
 
 Respond with these fields:
-- "title": under 60 characters. Plain words, no hashtags, no quotes around it. Use the people's names ({people}) when the transcript says who did or said something. Describe what happens, using real words from the clip. Do not invent events that are not in the transcript.
+- "title": under 60 characters. Plain words, no hashtags, no quotes around it. {names} Describe what happens, using real words from the clip. Do not invent events that are not in the transcript.
 - "why": one sentence on why it is (or is not) worth a clip.
 - "score": 1 to 10 for how good this moment is. Be critical. Most candidates are 3 to 6. Only a moment you would send to a friend is an 8 or higher.
 - "trim_start": seconds to cut from the start of the clip when it opens with dead air or unrelated talk. Use 0 when the start is fine.

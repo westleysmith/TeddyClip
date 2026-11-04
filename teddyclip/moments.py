@@ -320,7 +320,10 @@ def label(
         if llm.enabled:
             events = ", ".join([m.kind] + m.events)
             answer = llm.ask(
-                _fill(prompt, transcript=_lines(m, segments), events=events, people=", ".join(people)),
+                _fill(prompt, transcript=_lines(m, segments), events=events, people=", ".join(people),
+                      who=f"The people playing are: {', '.join(people)}." if people else "",
+                      names=(f"Use the people's names ({', '.join(people)}) when the transcript says who did or said something."
+                             if people else "Do not use anyone's name: you do not know who is who.")),
                 LABEL_SCHEMA,
             )
         if not isinstance(answer, dict):

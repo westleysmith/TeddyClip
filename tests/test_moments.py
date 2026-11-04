@@ -410,7 +410,8 @@ def test_select_handles_empty_and_zero_duration():
 
 @pytest.mark.parametrize("name,fields", [
     ("sweep", {"transcript": "[0 - 5] hi"}),
-    ("label", {"transcript": "[0s - 5s] hi", "events": "none", "people": "Teddy, Sam"}),
+    ("label", {"transcript": "[0s - 5s] hi", "events": "none", "who": "The people playing are: Teddy, Sam.",
+               "names": "Use the people's names (Teddy, Sam) when the transcript says who did or said something."}),
     ("rerank", {"count": 3, "candidates": "0: x"}),
 ])
 def test_prompts_load_format_and_have_no_dashes(name, fields):
@@ -443,3 +444,14 @@ def test_prompt_examples_put_the_reason_first_and_name_no_score(name, first):
     example = next(line for line in load_prompt(name).splitlines() if line.startswith("{{"))
     assert re.search(r'"score": your score', example) and not re.search(r'"score": \d', example)
     assert example.index(first) < example.index('"score"')
+
+
+def test_label_without_names_tells_the_model_not_to_guess_them():
+    m = Moment(100, 160, 4, "laughter")
+    segs = [Segment(100, 160, "you fell off the bridge", [])]
+    named, anonymous = FakeLLM([{"score": 5, "title": "a", "why": "w"}]), FakeLLM([{"score": 5, "title": "b", "why": "w"}])
+    label([m], segs, named, load_prompt("label"), ["Westley", "Teddy"])
+    label([m], segs, anonymous, load_prompt("label"), [])
+    assert "Westley, Teddy" in named.prompts[0] and "guess" not in named.prompts[0]
+    assert "Do not use anyone's name" in anonymous.prompts[0]
+    assert "{" not in anonymous.prompts[0].replace('{"', "") and "are: ." not in anonymous.prompts[0]

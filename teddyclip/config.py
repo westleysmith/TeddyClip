@@ -77,7 +77,7 @@ def _default_lexicons() -> dict[str, list[str]]:
 @dataclass
 class Config:
     root: Path
-    people: list[str] = field(default_factory=lambda: ["Teddy", "Friend"])
+    people: list[str] = field(default_factory=list)  # optional: names for clip titles
     triggers: list[str] = field(default_factory=_default_triggers)
     audio_track: int | None = None
     whisper_model: str = "auto"
@@ -138,6 +138,9 @@ def _username() -> str:
     return os.environ.get("USERNAME") or getpass.getuser()
 
 
+PLACEHOLDER_PEOPLE = ["Teddy", "Friend"]
+
+
 def load_config(path: Path | None = None) -> Config:
     """Build a Config from defaults, overlaid by the YAML file at `path` if it exists.
 
@@ -165,4 +168,7 @@ def load_config(path: Path | None = None) -> Config:
         setattr(cfg, name, value)
 
     cfg.root = Path(str(cfg.root).replace("{user}", _username()))
+    if not isinstance(cfg.people, list) or cfg.people == PLACEHOLDER_PEOPLE:
+        cfg.people = []  # the old installer wrote this when nobody typed names
+    cfg.people = [str(p).strip() for p in cfg.people if str(p).strip()]
     return cfg

@@ -27,12 +27,12 @@ No typing needed. On Windows 10 or 11:
 
 1. Download [`Install TeddyClip.bat`](https://raw.githubusercontent.com/westleysmith/TeddyClip/main/Install%20TeddyClip.bat) (right-click the link, choose "Save link as"), or get the file from whoever set TeddyClip up for you.
 2. Double-click it. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**. If it asks whether the app may make changes, click **Yes**.
-3. Type your two names when it asks (they go in clip titles). A window then asks where TeddyClip should keep your recordings, clips and AI models: click **Yes** for the suggested folder, or **No** to pick another place, such as a bigger drive. Then leave the window open. The first install downloads a few GB and can take 20 to 40 minutes.
-4. When it says **All done!**, two shortcuts are on your desktop:
+3. The TeddyClip setup window opens. Type your names if you like (they can go in clip titles) and click **Install**. It shows what it is doing; the first install downloads about 5 GB and usually takes 10 to 30 minutes. You can keep using the PC.
+4. When it says **All set!**, click **Open TeddyClip**. Two shortcuts are on your desktop:
    - **TeddyClip** opens TeddyClip in its own window. Everything happens there.
    - **TeddyClip Folders** opens the folder where recordings go in and clips come out.
 
-It installs Python 3.12, FFmpeg and Ollama (with winget), puts TeddyClip in `%LOCALAPPDATA%\TeddyClip-app`, sets up transcription on the graphics card (NVIDIA, AMD or Intel), and downloads the AI models so the first run starts straight away. Run it again any time to update TeddyClip; your settings in `config.yaml` are kept.
+It installs Python 3.12, FFmpeg and Ollama (with winget), puts TeddyClip in `%LOCALAPPDATA%\TeddyClip-app` and your recordings and clips in `C:\Users\<you>\TeddyClip`, sets up transcription on the graphics card (NVIDIA, AMD or Intel), and downloads the AI models so the first run starts straight away. Run it again any time to update TeddyClip; your settings in `config.yaml` are kept. If something goes wrong, the window says what and shows the details; the full log is `install-log.txt` in the app folder.
 
 ## Manual install (Windows)
 
@@ -117,7 +117,7 @@ Everything works with no changes except the names. The settings are in `config.y
 | Setting | What it does |
 |---|---|
 | `root` | Where `1 - Raw recordings`, `2 - Clips`, `3 - Highlight videos` and `4 - Finished recordings` live. Default `C:\Users\{user}\TeddyClip`. |
-| `people` | The names used in clip titles. Change `Friend` to your friend's real name. |
+| `people` | Optional names for clip titles, for example `[Westley, Teddy]`. Empty (`[]`) means titles do not use names. |
 | `triggers` | The phrases that always make a clip. Add any variants the transcript mishears. |
 | `audio_track` | Which OBS audio track holds your microphones (for example `2`). Leave as `null` to use track 1. See the [OBS setup guide](docs/obs-setup.md). |
 | `whisper_model` | `auto` picks a large model on a GPU (with the GPU libraries installed) and a small one on the CPU. |

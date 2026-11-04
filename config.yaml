@@ -1,5 +1,5 @@
 root: C:\Users\{user}\TeddyClip
-people: [Teddy, Friend]            # used in titles
+people: []                         # optional: your names for clip titles, e.g. [Westley, Teddy]
 triggers: ["clip that", "clip it", "clip this"]
 audio_track: null                  # e.g. 2 if mics are on their own OBS track
 whisper_model: auto                # large-v3-turbo on GPU, small on CPU
