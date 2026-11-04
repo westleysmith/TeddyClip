@@ -62,6 +62,24 @@ def _set_window_icon(window) -> None:
         pass  # cosmetic only
 
 
+class Api:
+    """What the page can ask the window for (window.pywebview.api in the page)."""
+
+    def __init__(self) -> None:
+        self.window = None
+
+    def pick_recordings(self) -> list[str]:
+        """The Windows file picker, opened at Videos (where OBS records by default)."""
+        import webview
+
+        start = Path.home() / "Videos"
+        kind = getattr(getattr(webview, "FileDialog", None), "OPEN", None) or webview.OPEN_DIALOG
+        chosen = self.window.create_file_dialog(
+            kind, directory=str(start if start.is_dir() else Path.home()), allow_multiple=True,
+            file_types=("Recordings (*.mp4;*.mkv)", "All files (*.*)"))
+        return [str(p) for p in chosen or []]
+
+
 def main() -> int:
     import webview
 
@@ -77,9 +95,11 @@ def main() -> int:
     if server is not None:
         threading.Thread(target=server.serve_forever, daemon=True).start()
 
+    api = Api()
     window = webview.create_window("TeddyClip", f"http://127.0.0.1:{ui.PORT}/",
                                    width=1320, height=900, min_size=(760, 560),
-                                   background_color="#F3EAD8")
+                                   background_color="#F3EAD8", js_api=api)
+    api.window = window
     window.events.shown += lambda: _set_window_icon(window)
     try:
         webview.start()

@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -120,3 +121,84 @@ def test_job_log_handles_carriage_return_progress():
     job.write("Transcribed up to 1.0s\rTranscribed up to 2.0s")
     job.write("\nMeasuring loudness...\n")
     assert job.state()["lines"] == ["Transcribed up to 1.0s", "Transcribed up to 2.0s", "Measuring loudness..."]
+
+
+def test_titles_come_from_the_working_folder_notes(server, cfg):
+    folder = cfg.paths.clips / "2026-11-04 Dark Souls"
+    folder.mkdir(parents=True)
+    (folder / "0h01m00s - Big jump.mp4").write_bytes(b"x")
+    notes = cfg.paths.notes / folder.name
+    notes.mkdir(parents=True)
+    (notes / "moments.csv").write_text("keep,start,end,score,kind,title,why,events,file\n"
+                                       "yes,0:01:00,0:01:40,8,laughter,Big jump,big laugh,,0h01m00s - Big jump.mp4\n",
+                                       encoding="utf-8-sig")
+    clip = json.loads(get(server + "/api/state")[2])["sessions"][0]["clips"][0]
+    assert (clip["kind"], clip["why"]) == ("laughter", "big laugh")
+
+
+def test_add_moves_recordings_into_the_game_folder(server, cfg, tmp_path):
+    videos = tmp_path / "Videos"
+    videos.mkdir()
+    a, b = videos / "2026-11-04 20-00-00.mp4", videos / "2026-11-04 22-00-00.mkv"
+    a.write_bytes(b"a" * 1000)
+    b.write_bytes(b"b")
+    (cfg.paths.inbox / "Elden Ring").mkdir(parents=True)
+    (cfg.paths.inbox / "Elden Ring" / a.name).write_bytes(b"older")  # same name already there
+    status, _ = post(server + "/api/add", {"files": [str(a), str(b)], "game": "Elden Ring"})
+    assert status == 200
+    for _ in range(100):
+        if not json.loads(get(server + "/api/state")[2])["job"]["running"]:
+            break
+        time.sleep(0.05)
+    inbox = cfg.paths.inbox / "Elden Ring"
+    assert sorted(p.name for p in inbox.iterdir()) == sorted([a.name, f"{a.stem} (2).mp4", b.name])
+    assert (inbox / f"{a.stem} (2).mp4").read_bytes() == b"a" * 1000
+    assert not a.exists() and not b.exists()  # moved, not copied
+
+
+def test_add_keeps_the_date_when_copying_across_drives(cfg, tmp_path, monkeypatch):
+    src = tmp_path / "rec.mp4"
+    src.write_bytes(b"z" * 5000)
+    old = time.time() - 3600
+    os.utime(src, (old, old))
+    real_replace = os.replace
+    calls = []
+
+    def cross_drive_once(a, b):  # the first rename fails as it would across drives
+        calls.append(a)
+        if len(calls) == 1:
+            raise OSError("different drive")
+        return real_replace(a, b)
+
+    monkeypatch.setattr(ui.os, "replace", cross_drive_once)
+    assert ui.add_recordings([src], "GTA", cfg) == 0
+    moved = cfg.paths.inbox / "GTA" / "rec.mp4"
+    assert moved.read_bytes() == b"z" * 5000 and not src.exists()
+    assert abs(moved.stat().st_mtime - old) < 2  # still counts as a finished recording
+
+
+@pytest.mark.parametrize("body", [{"files": []}, {"files": "C:/x.mp4"}, {"files": ["relative.mp4"]},
+                                  {"files": ["C:/does/not/exist.mp4"]}])
+def test_add_rejects_bad_requests(server, body):
+    assert post(server + "/api/add", body)[0] == 400
+
+
+def test_add_rejects_non_recordings(server, tmp_path):
+    doc = tmp_path / "notes.txt"
+    doc.write_text("x")
+    status, body = post(server + "/api/add", {"files": [str(doc)]})
+    assert status == 400 and "mp4" in body["error"]
+
+
+@pytest.mark.parametrize("raw,clean", [("Elden Ring", "Elden Ring"), ("  GTA: V?  ", "GTA V"),
+                                       ("../..", None), ("", None), (None, None)])
+def test_game_names_are_safe_folder_names(raw, clean):
+    assert ui.game_name(raw) == clean
+
+
+def test_other_web_pages_cannot_act(server):
+    req = urllib.request.Request(server + "/api/process", data=b"{}", method="POST",
+                                 headers={"Content-Type": "application/json", "Origin": "https://evil.example"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req)
+    assert e.value.code == 403

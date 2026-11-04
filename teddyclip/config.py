@@ -12,6 +12,9 @@ import yaml
 DEFAULT_ROOT = r"C:\Users\{user}\TeddyClip"
 
 
+OLD_FOLDER_NAMES = ("1 Inbox", "2 Clips", "3 Highlights", "Done")
+
+
 @dataclass
 class Paths:
     inbox: Path
@@ -20,8 +23,14 @@ class Paths:
     done: Path
     cache: Path
     models: Path
+    notes: Path  # moments.csv per clip folder, kept out of the clip folders
 
     def ensure(self) -> None:
+        # Folders from versions before the "1 - Raw recordings" names are renamed in place.
+        for old, new in zip(OLD_FOLDER_NAMES, (self.inbox, self.clips, self.highlights, self.done)):
+            was = new.parent / old
+            if was.is_dir() and not new.exists():
+                was.rename(new)
         for p in (self.inbox, self.clips, self.highlights, self.done, self.cache, self.models):
             p.mkdir(parents=True, exist_ok=True)
 
@@ -84,17 +93,19 @@ class Config:
     games: dict[str, str] = field(default_factory=_default_games)
     lexicons: dict[str, list[str]] = field(default_factory=_default_lexicons)
     resolve_timeline_start: str = "01:00:00:00"
+    resolve_markers: bool = False
 
     @property
     def paths(self) -> Paths:
         r = Path(self.root)
         return Paths(
-            inbox=r / "1 Inbox",
-            clips=r / "2 Clips",
-            highlights=r / "3 Highlights",
-            done=r / "Done",
+            inbox=r / "1 - Raw recordings",
+            clips=r / "2 - Clips",
+            highlights=r / "3 - Highlight videos",
+            done=r / "4 - Finished recordings",
             cache=r / ".cache",
             models=r / ".cache" / "models",
+            notes=r / ".cache" / "sessions",
         )
 
 
@@ -117,6 +128,7 @@ _FLAT_KEYS: dict[str, tuple[str | None, str]] = {
     "games": (None, "games"),
     "lexicons": (None, "lexicons"),
     "resolve_timeline_start": ("resolve", "timeline_start"),
+    "resolve_markers": ("resolve", "markers"),
 }
 
 

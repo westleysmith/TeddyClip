@@ -103,3 +103,21 @@ def test_ffmpeg_runs_without_flashing_a_console(monkeypatch):
                         subprocess.CompletedProcess(cmd, 0, b"", b""))
     media._run(["ffmpeg", "-version"], "check")
     assert calls[0]["creationflags"] == subprocess.CREATE_NO_WINDOW
+
+
+def test_pick_recordings_opens_the_file_picker_at_videos(monkeypatch, tmp_path):
+    asked = {}
+
+    class Window:
+        def create_file_dialog(self, kind, directory="", allow_multiple=False, file_types=()):
+            asked.update(directory=directory, multiple=allow_multiple, types=file_types)
+            return (r"C:\Videos\a.mp4",)
+
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(OPEN_DIALOG=10))
+    monkeypatch.setattr(app.Path, "home", staticmethod(lambda: tmp_path))
+    (tmp_path / "Videos").mkdir()
+    api = app.Api()
+    api.window = Window()
+    assert api.pick_recordings() == [r"C:\Videos\a.mp4"]
+    assert asked["directory"] == str(tmp_path / "Videos") and asked["multiple"]
+    assert "*.mp4" in asked["types"][0]

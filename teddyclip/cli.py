@@ -102,7 +102,7 @@ def is_finished(path: Path, quiet_seconds: float = QUIET_SECONDS, now: float | N
 
 def _folder_name(path: Path, cfg: Config, mtime: float) -> str:
     """"<date> <game>": the recording's date and its inbox subfolder (or its
-    file name). " (2)", " (3)" are added while that name is taken in 2 Clips or Done."""
+    file name). " (2)", " (3)" are added while that name is taken in the clip or finished folders."""
     date = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
     try:
         parts = path.relative_to(cfg.paths.inbox).parts
@@ -143,7 +143,7 @@ def _check_room_for_original(src: Path, done: Path) -> None:
     if free < need:
         drive = Path(done).drive or Path(done).anchor or str(done)
         raise RuntimeError(
-            f"Not enough free space on {drive} to file the original in Done: "
+            f"Not enough free space on {drive} to file the original in Finished recordings: "
             f"need about {max(need / 1e9, 0.1):.1f} GB, {free / 1e9:.1f} GB is free. "
             "Free up some space and run TeddyClip again."
         )
@@ -166,6 +166,11 @@ def _mark_incomplete(out_dir: Path) -> Path | None:
         return None
     print(f"The clips made so far are in \"{target.name}\".")
     return target
+
+
+def notes_file(cfg: Config, session: str) -> Path:
+    """Where the moments.csv for a clip folder is kept."""
+    return cfg.paths.notes / session / "moments.csv"
 
 
 def process_recording(path: Path, cfg: Config) -> Path:
@@ -262,15 +267,18 @@ def process_recording(path: Path, cfg: Config) -> Path:
     try:
         with progress.band(0.90, 0.98, "Cutting clips"):
             write_clips(path, moments, out_dir)
-        write_moments_csv(moments, out_dir / "moments.csv")
-        write_resolve_edl(moments, out_dir / "Resolve markers.edl", info.fps, cfg.resolve_timeline_start, name)
+        # TeddyClip's own record of every moment (the window reads it) stays out
+        # of the clip folder, so that folder holds only clips.
+        write_moments_csv(moments, notes_file(cfg, name))
+        if cfg.resolve_markers:
+            write_resolve_edl(moments, out_dir / "Resolve markers.edl", info.fps, cfg.resolve_timeline_start, name)
 
-        with progress.band(0.98, 1.00, "Filing the original in Done"):
+        with progress.band(0.98, 1.00, "Filing the original in Finished recordings"):
             if _in_inbox(path, cfg):
-                print("Moving the original to Done...")
+                print("Moving the original to Finished recordings...")
                 archive_original(path, paths.done, moments, name)
             else:
-                print("Copying the original into Done (it is outside the inbox, so it stays where it is)...")
+                print("Copying the original into Finished recordings (it is outside Raw recordings, so it stays where it is)...")
                 archive_original(path, paths.done, moments, name, keep_source=True)
     except BaseException:
         _mark_incomplete(out_dir)
@@ -335,7 +343,7 @@ def process_inbox(cfg: Config) -> int:
                 processed.append(process_recording(path, cfg))
         except Exception as e:
             print(f"Could not process {path.name}: {_describe(e)}")
-            print("It stays in the inbox, so you can fix the problem and run TeddyClip again.")
+            print("It stays in Raw recordings, so you can fix the problem and run TeddyClip again.")
             failed.append((path, _describe(e)))
 
     print(f"\nDone: {len(processed)} processed, {len(failed)} failed")
@@ -352,7 +360,7 @@ def process_inbox(cfg: Config) -> int:
 
 
 def highlight(folder: Path, cfg: Config) -> int:
-    """Join the clips left in a clip folder into 3 Highlights, with chapters."""
+    """Join the clips left in a clip folder into 3 - Highlight videos, with chapters."""
     folder = Path(folder)
     if not folder.is_dir():
         print(f"No such folder: {folder}")
@@ -463,7 +471,7 @@ def _check_config(cfg: Config) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="teddyclip",
-        description="Turn long gaming recordings into clips. With no command, every finished recording in the inbox is processed.",
+        description="Turn long gaming recordings into clips. With no command, every finished recording in 1 - Raw recordings is processed.",
     )
     parser.add_argument("--config", type=Path, help="config.yaml to use (default: config.yaml in the current folder)")
     commands = parser.add_subparsers(dest="command")

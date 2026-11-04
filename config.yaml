@@ -25,4 +25,5 @@ lexicons:                           # trimmed to English
   sandbox: ["WASTED", "BUSTED", "MISSION PASSED", "MISSION FAILED"]
   shooter: ["ROUND WON", "ROUND LOST", "ACE", "BOMB PLANTED", "BOMB DEFUSED"]
 resolve:
+  markers: false                   # true puts "Resolve markers.edl" in each clip folder, for editing in DaVinci Resolve
   timeline_start: "01:00:00:00"

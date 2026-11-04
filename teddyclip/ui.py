@@ -145,14 +145,93 @@ def _media_url(kind: str, *parts: str) -> str:
     return "/media/" + kind + "/" + "/".join(quote(p) for p in parts)
 
 
-def _clip_notes(session: Path) -> dict[str, dict]:
-    csv_path = session / "moments.csv"
+def _clip_notes(cfg: Config, session: Path) -> dict[str, dict]:
+    """Title, reason and tags per clip file, from moments.csv (kept in the
+    working folder; clip folders from older versions have it inside)."""
+    csv_path = cli.notes_file(cfg, session.name)
+    if not csv_path.is_file():
+        csv_path = session / "moments.csv"
     if not csv_path.is_file():
         return {}
     with contextlib.suppress(OSError, csv.Error):
         with csv_path.open(encoding="utf-8-sig", newline="") as f:
             return {row.get("file", ""): row for row in csv.DictReader(f) if row.get("file")}
     return {}
+
+
+def game_name(text: object) -> str | None:
+    """A game name usable as a folder name, or None for no game."""
+    if not isinstance(text, str):
+        return None
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", text).strip().strip(".").strip()
+    return name[:60] or None
+
+
+def _free_name(path: Path) -> Path:
+    n = 2
+    candidate = path
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        n += 1
+    return candidate
+
+
+def _move(src: Path, dst: Path) -> None:
+    """Move a recording. On the same drive this is instant; across drives it is
+    copied in chunks (reporting progress), checked, and only then removed. The
+    file keeps its date, which names the clip folder and is how TeddyClip tells
+    a finished recording from one still being written."""
+    try:
+        os.replace(src, dst)
+        return
+    except OSError:
+        pass  # a different drive: copy instead
+    stat = src.stat()
+    part = dst.with_name(dst.name + ".part")
+    try:
+        with src.open("rb") as fin, part.open("wb") as fout:
+            done = 0
+            while chunk := fin.read(8 * CHUNK):
+                fout.write(chunk)
+                done += len(chunk)
+                progress.step(done / stat.st_size if stat.st_size else 1.0)
+        if part.stat().st_size != stat.st_size:
+            raise OSError("the copy came out a different size")
+        os.utime(part, (stat.st_atime, stat.st_mtime))
+        os.replace(part, dst)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    src.unlink()
+
+
+def add_recordings(files: list[Path], game: str | None, cfg: Config) -> int:
+    """Move recordings into the inbox, inside a folder named after the game
+    when there is one. Returns the number that could not be moved."""
+    dest = cfg.paths.inbox / game if game else cfg.paths.inbox
+    dest.mkdir(parents=True, exist_ok=True)
+    failed = 0
+    for n, src in enumerate(files):
+        with progress.band(n / len(files), (n + 1) / len(files), f"Adding {src.name}"):
+            print(f"Adding {src.name} to Raw recordings" + (f" under {game}" if game else ""))
+            try:
+                _move(src, _free_name(dest / src.name))
+            except OSError as e:
+                print(f"Could not add {src.name}: {e}")
+                failed += 1
+    print("Added. Click Make clips when you are ready." if not failed else "Some recordings could not be added.")
+    return failed
+
+
+def _games(cfg: Config, sessions: list[dict]) -> list[str]:
+    """Games to offer when adding recordings: recently used first, then the
+    games TeddyClip knows from config.yaml."""
+    seen: dict[str, str] = {}
+    recent = [s["name"].split(" ", 1)[1].split(" (")[0] for s in sessions if " " in s["name"]]
+    folders = [d.name for d in cfg.paths.inbox.iterdir() if d.is_dir()] if cfg.paths.inbox.is_dir() else []
+    for name in recent + folders + [g.title() for g in cfg.games]:
+        seen.setdefault(name.lower(), name)
+    return list(seen.values())
 
 
 def state(cfg: Config, job: Job) -> dict:
@@ -166,7 +245,7 @@ def state(cfg: Config, job: Job) -> dict:
     if paths.clips.is_dir():
         folders = [d for d in paths.clips.iterdir() if d.is_dir()]
         for folder in sorted(folders, key=lambda d: d.stat().st_mtime, reverse=True):
-            notes = _clip_notes(folder)
+            notes = _clip_notes(cfg, folder)
             clips = []
             for clip in sorted(folder.glob("*.mp4"), key=lambda p: p.name):
                 row = notes.get(clip.name, {})
@@ -179,7 +258,7 @@ def state(cfg: Config, job: Job) -> dict:
             sessions.append({"name": folder.name, "clips": clips,
                              "incomplete": "(incomplete" in folder.name,
                              "highlight": _media_url("highlights", highlight.name) if highlight.is_file() else None})
-    return {"inbox": inbox, "sessions": sessions, "job": job.state()}
+    return {"inbox": inbox, "sessions": sessions, "games": _games(cfg, sessions), "job": job.state()}
 
 
 def make_handler(cfg: Config, job: Job):
@@ -267,6 +346,12 @@ def make_handler(cfg: Config, job: Job):
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
+            # Only TeddyClip's own page may act. A web page from elsewhere that
+            # tries to post here carries its own Origin and is refused.
+            port = self.server.server_address[1]
+            origin = self.headers.get("Origin")
+            if origin and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+                return self._error(HTTPStatus.FORBIDDEN, "not allowed")
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 data = json.loads(self.rfile.read(length) or b"{}") if length else {}
@@ -275,6 +360,20 @@ def make_handler(cfg: Config, job: Job):
             if not isinstance(data, dict):
                 return self._error(HTTPStatus.BAD_REQUEST, "bad request")
 
+            if path == "/api/add":
+                names = data.get("files")
+                if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+                    return self._error(HTTPStatus.BAD_REQUEST, "no recordings chosen")
+                files = [Path(n) for n in names]
+                bad = [f.name for f in files if not (f.is_absolute() and f.is_file()
+                                                      and f.suffix.lower() in cli.VIDEO_SUFFIXES)]
+                if bad:
+                    return self._error(HTTPStatus.BAD_REQUEST,
+                                       f"Only .mp4 and .mkv recordings can be added ({', '.join(bad)})")
+                game = game_name(data.get("game"))
+                if not job.start("Adding recordings", lambda: add_recordings(files, game, cfg)):
+                    return self._error(HTTPStatus.CONFLICT, "TeddyClip is busy; try again when it is done")
+                return self._json({"ok": True})
             if path == "/api/process":
                 if not job.start("Making clips", lambda: cli.process_inbox(cfg)):
                     return self._error(HTTPStatus.CONFLICT, "TeddyClip is already busy")

@@ -22,9 +22,21 @@ def test_user_placeholder_and_folder_names(tmp_path, monkeypatch):
     monkeypatch.setenv("USERNAME", "teddy")
     p = tmp_path / "c.yaml"; p.write_text("root: C:\\Users\\{user}\\TeddyClip\n")
     paths = load_config(p).paths
-    assert str(paths.inbox).endswith(r"teddy\TeddyClip\1 Inbox")
-    assert paths.clips.name == "2 Clips" and paths.highlights.name == "3 Highlights"
-    assert paths.done.name == "Done" and paths.cache.name == ".cache"
+    assert str(paths.inbox).endswith(r"teddy\TeddyClip\1 - Raw recordings")
+    assert paths.inbox.name == "1 - Raw recordings" and paths.clips.name == "2 - Clips"
+    assert paths.highlights.name == "3 - Highlight videos" and paths.done.name == "4 - Finished recordings"
+    assert paths.cache.name == ".cache"
+
+
+def test_old_folder_names_are_renamed_in_place(tmp_path):
+    cfg = load_config(tmp_path / "missing.yaml")
+    cfg.root = tmp_path
+    for old in ("1 Inbox", "2 Clips", "Done"):
+        (tmp_path / old).mkdir()
+    (tmp_path / "2 Clips" / "keep.mp4").write_bytes(b"x")
+    cfg.paths.ensure()
+    assert (tmp_path / "2 - Clips" / "keep.mp4").exists() and not (tmp_path / "2 Clips").exists()
+    assert (tmp_path / "1 - Raw recordings").is_dir() and (tmp_path / "4 - Finished recordings").is_dir()
 
 
 def test_language_defaults_to_english_and_null_means_auto_detect(tmp_path):

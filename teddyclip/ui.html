@@ -72,15 +72,23 @@
   .k-joke { background: var(--teal); } .k-game { background: var(--plum); } .k-loud { background: var(--avocado); }
   .highlight { margin-bottom: 16px; max-width: 720px; }
   .empty { text-align: center; padding: 44px 20px; }
-  dialog#ask { border: 1.5px solid var(--line); border-radius: 20px; background: var(--card); color: var(--ink);
+  dialog.card { border: 1.5px solid var(--line); border-radius: 20px; background: var(--card); color: var(--ink);
                padding: 26px 28px 22px; width: min(420px, 90vw); box-shadow: 8px 8px 0 rgba(91, 61, 41, .18);
                font: inherit; text-align: center; }
-  dialog#ask::backdrop { background: rgba(46, 35, 27, .45); }
-  dialog#ask h3 { margin: 10px 0 6px; font-size: 19px; color: var(--walnut); overflow-wrap: anywhere; }
-  dialog#ask p { margin: 0 0 20px; font-size: 14px; }
+  dialog.card::backdrop { background: rgba(46, 35, 27, .45); }
+  dialog.card h3 { margin: 10px 0 6px; font-size: 19px; color: var(--walnut); overflow-wrap: anywhere; }
+  dialog.card p { margin: 0 0 20px; font-size: 14px; }
   .ask-art { width: 46px; height: 46px; margin: 0 auto; border-radius: 50%;
              background: radial-gradient(circle, var(--cream) 0 34%, transparent 35%), var(--orange);
              box-shadow: 0 0 0 5px var(--mustard); }
+  .field-label { font-weight: 700; color: var(--walnut); margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 12px; }
+  .chips button { padding: 4px 14px; font-size: 13.5px; border-width: 1.5px; border-color: var(--line); }
+  .chips button.on { background: var(--teal); border-color: var(--teal); color: var(--cream); }
+  #game-input { width: 100%; font: inherit; padding: 9px 16px; border-radius: 999px; border: 1.5px solid var(--line);
+                background: var(--cream); color: var(--ink); text-align: center; }
+  #game-input:focus { outline: none; border-color: var(--orange); }
+  dialog.card p.hint { font-size: 12.5px; margin: 8px 0 18px; }
   .ask-buttons { display: flex; gap: 12px; justify-content: center; }
   .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--walnut);
            color: var(--cream); padding: 10px 18px; border-radius: 999px; display: none; box-shadow: 4px 4px 0 var(--orange); }
@@ -119,7 +127,7 @@
   <div id="sessions"></div>
 </main>
 <div class="toast" id="toast"></div>
-<dialog id="ask">
+<dialog id="ask" class="card">
   <div class="ask-art" aria-hidden="true"></div>
   <h3 id="ask-title"></h3>
   <p id="ask-text" class="muted"></p>
@@ -128,11 +136,24 @@
     <button id="ask-yes" class="primary">Delete</button>
   </div>
 </dialog>
+<dialog id="add-dialog" class="card">
+  <div class="ask-art" aria-hidden="true"></div>
+  <h3 id="add-title"></h3>
+  <p id="add-files" class="muted"></p>
+  <div class="field-label">Which game is it?</div>
+  <div class="chips" id="game-chips"></div>
+  <input id="game-input" placeholder="or type the game's name" autocomplete="off" maxlength="60">
+  <p class="muted hint">The game name switches on screen checks like YOU DIED. Leave it empty if it doesn't matter.</p>
+  <div class="ask-buttons">
+    <button id="add-no">Cancel</button>
+    <button id="add-yes" class="primary">Add</button>
+  </div>
+</dialog>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const KIND = {trigger: "Clip that", marker: "OBS marker", laughter: "Laughter", joke: "Joke", game: "Game event", loud: "Loud"};
-let busy = false, lastSessions = "", wasRunning = false;
+let busy = false, lastSessions = "", wasRunning = false, games = [];
 
 function toast(text) {
   const t = $("toast"); t.textContent = text; t.style.display = "block";
@@ -150,14 +171,14 @@ function renderInbox(inbox) {
   const ready = inbox.filter((f) => f.ready).length;
   let html;
   if (!inbox.length) {
-    html = `<div class="row"><b>Inbox is empty.</b><span class="muted">Click <i>Add recordings</i>, drop your OBS recordings in that folder (inside a folder named after the game if you like), then click <i>Make clips</i>.</span></div>`;
+    html = `<div class="row"><b>No raw recordings waiting.</b><span class="muted">Click <i>Add recordings</i> and pick a session, then click <i>Make clips</i>.</span></div>`;
   } else {
-    html = `<b>${inbox.length} recording${inbox.length === 1 ? "" : "s"} in the inbox</b>` +
+    html = `<b>${inbox.length} raw recording${inbox.length === 1 ? "" : "s"} waiting</b>` +
       `<ul class="inbox-list">${inbox.map((f) => `<li>${esc(f.name)}${f.ready ? "" : ' <span class="muted">(still being recorded or copied)</span>'}</li>`).join("")}</ul>`;
   }
   $("inbox").innerHTML = html;
   $("make").disabled = busy || ready === 0;
-  $("make").title = ready ? "" : "Add a finished recording to the inbox first";
+  $("make").title = ready ? "" : "Add a recording first";
 }
 
 function minutes(seconds) {
@@ -237,6 +258,7 @@ async function refresh() {
     busy = st.job.running;
     if (wasRunning && !busy) lastSessions = "";  // a job just finished: show its results
     wasRunning = busy;
+    games = st.games || [];
     renderInbox(st.inbox);
     renderJob(st.job);
     renderSessions(st.sessions);
@@ -263,7 +285,38 @@ function ask(title, text) {
   });
 }
 
-$("add").onclick = () => post("/api/open", {folder: "inbox"});
+// Which game the new recordings are from. Resolves to the name ("" for none) or null if cancelled.
+function askGame(files) {
+  const d = $("add-dialog"), input = $("game-input"), chips = $("game-chips");
+  const names = files.map((f) => f.split(/[\\/]/).pop());
+  $("add-title").textContent = names.length === 1 ? "Add 1 recording" : `Add ${names.length} recordings`;
+  $("add-files").textContent = names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+  input.value = "";
+  chips.innerHTML = games.slice(0, 8).map((g) => `<button type="button">${esc(g)}</button>`).join("");
+  const mark = () => chips.querySelectorAll("button").forEach((c) => c.classList.toggle("on", c.textContent === input.value.trim()));
+  chips.onclick = (e) => { const c = e.target.closest("button"); if (c) { input.value = c.textContent; mark(); } };
+  input.oninput = mark;
+  return new Promise((resolve) => {
+    const done = (value) => { d.onclose = null; d.close(); resolve(value); };
+    $("add-yes").onclick = () => done(input.value.trim());
+    $("add-no").onclick = () => done(null);
+    input.onkeydown = (e) => { if (e.key === "Enter") done(input.value.trim()); };
+    d.onclick = (e) => { if (e.target === d) done(null); };
+    d.onclose = () => resolve(null);
+    d.showModal();
+    input.focus();
+  });
+}
+
+$("add").onclick = async () => {
+  const api = window.pywebview && window.pywebview.api;
+  if (!api) return post("/api/open", {folder: "inbox"});  // in a web browser: just open the Raw recordings folder
+  const files = await api.pick_recordings();
+  if (!files || !files.length) return;
+  const game = await askGame(files);
+  if (game === null) return;
+  if (await post("/api/add", {files, game})) refresh();
+};
 $("make").onclick = async () => { if (await post("/api/process")) refresh(); };
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
