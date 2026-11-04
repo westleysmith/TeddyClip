@@ -1,4 +1,5 @@
 import math
+import re
 
 import numpy as np
 import pytest
@@ -425,7 +426,8 @@ def test_kinds_order():
     assert math.isclose(Moment(1, 4, 0, "loud").duration, 3)
 
 
-# prompts: the model writes its reason before its score, and the example score is low
+# prompts: the model writes its reason before its score, and the example names no score
+# (qwen3:4b copied an example "score": 2 onto every slice of a real recording)
 
 def test_schemas_ask_for_the_reason_before_the_score():
     from teddyclip.moments import LABEL_SCHEMA, SWEEP_SCHEMA
@@ -437,7 +439,7 @@ def test_schemas_ask_for_the_reason_before_the_score():
 
 
 @pytest.mark.parametrize("name, first", [("sweep", '"quote"'), ("label", '"why"')])
-def test_prompt_examples_put_the_reason_first_with_a_low_score(name, first):
+def test_prompt_examples_put_the_reason_first_and_name_no_score(name, first):
     example = next(line for line in load_prompt(name).splitlines() if line.startswith("{{"))
-    assert '"score": 2' in example
+    assert re.search(r'"score": your score', example) and not re.search(r'"score": \d', example)
     assert example.index(first) < example.index('"score"')
