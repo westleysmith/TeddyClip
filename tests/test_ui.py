@@ -396,3 +396,16 @@ def test_a_recording_stays_ready_while_its_preview_is_streaming(server, cfg):
         assert rec["name"] == os.path.join("Game", "long.mp4") and rec["ready"] is True
     finally:
         viewer.close()
+
+
+def test_the_logo_font_is_served_from_the_app(server, tmp_path, monkeypatch):
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "Fredoka.ttf").write_bytes(b"\0\1\0\0 fake font")
+    monkeypatch.setattr(ui, "FONTS", fonts)
+    status, headers, body = get(server + "/fonts/Fredoka.ttf")
+    assert status == 200 and body == b"\0\1\0\0 fake font" and headers["Content-Type"] == "font/ttf"
+    for bad in ["/fonts/missing.ttf", "/fonts/..%5Cui.py", "/fonts/../ui.html", "/fonts/notes.txt"]:
+        with pytest.raises(urllib.error.HTTPError) as e:
+            get(server + bad)
+        assert e.value.code == 404

@@ -1,31 +1,33 @@
-"""Draws teddyclip/teddyclip.ico, the starburst logo from the TeddyClip page.
+"""Draws teddyclip/teddyclip.ico, the bear logo from the TeddyClip page.
 Run it again only if the logo changes: python scripts/make_icon.py"""
 
 import io
-import math
 import struct
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-ORANGE, MUSTARD, CREAM, TEAL = "#d4612a", "#d9a227", "#fff9ee", "#2b7a74"
+ORANGE, EAR, CREAM, BROWN = "#d4612a", "#f0a35e", "#fbf1e1", "#4a2e1f"
 OUT = Path(__file__).resolve().parent.parent / "teddyclip" / "teddyclip.ico"
 SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 
 
 def draw(size: int = 1024) -> Image.Image:
+    """The page's bear SVG (a 48 x 44 grid), centred on a square."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    s = size / 40  # the page's SVG is drawn on a 40 x 40 grid
-    c = 20 * s
-    d.ellipse([c - 18 * s, c - 18 * s, c + 18 * s, c + 18 * s], fill=ORANGE)
-    for k in range(8):
-        a = k * math.pi / 4
-        inner, outer = 9.5 * s, 16 * s
-        d.line([(c + inner * math.cos(a), c + inner * math.sin(a)),
-                (c + outer * math.cos(a), c + outer * math.sin(a))], fill=MUSTARD, width=round(2.8 * s))
-    d.ellipse([c - 7.5 * s, c - 7.5 * s, c + 7.5 * s, c + 7.5 * s], fill=CREAM)
-    d.polygon([(18 * s, 16.5 * s), (24 * s, 20 * s), (18 * s, 23.5 * s)], fill=TEAL)
+    s, top = size / 48, 2 * size / 48
+
+    def circle(cx, cy, r, fill, ry=None):
+        ry = r if ry is None else ry
+        d.ellipse([(cx - r) * s, top + (cy - ry) * s, (cx + r) * s, top + (cy + ry) * s], fill=fill)
+
+    for cx in (10.5, 37.5):
+        circle(cx, 11, 8.5, ORANGE)
+        circle(cx, 11, 4.4, EAR)
+    circle(24, 25.5, 18, ORANGE, ry=17)
+    circle(24, 28, 9.6, CREAM)
+    d.polygon([(20.6 * s, top + 23.4 * s), (28.8 * s, top + 28 * s), (20.6 * s, top + 32.6 * s)], fill=BROWN)
     return img
 
 

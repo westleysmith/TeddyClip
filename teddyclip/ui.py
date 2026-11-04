@@ -25,6 +25,7 @@ from teddyclip.config import Config
 
 PAGE = Path(__file__).with_name("ui.html")
 EDITOR = Path(__file__).with_name("editor.html")
+FONTS = Path(__file__).with_name("fonts")  # the logo font, shipped with the app
 ARCHIVE = "Archived"  # inside 2 - Clips: sessions put away from the main list
 PORT = 8765
 CHUNK = 1 << 20
@@ -467,6 +468,18 @@ def make_handler(cfg: Config, job: Job):
                 self._session(path[len("/api/session/"):])
             elif path.startswith("/media/"):
                 self._media(path.split("/")[2:])
+            elif path.startswith("/fonts/"):
+                name = _plain_name(path[len("/fonts/"):])
+                font = FONTS / name if name and name.lower().endswith((".ttf", ".woff2")) else None
+                if font is None or not font.is_file():
+                    return self._error(HTTPStatus.NOT_FOUND, "not found")
+                body = font.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "font/woff2" if name.lower().endswith(".woff2") else "font/ttf")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "max-age=86400")
+                self.end_headers()
+                self.wfile.write(body)
             else:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
 

@@ -18,7 +18,12 @@
   header .bar { display: flex; align-items: center; gap: 12px; max-width: 1280px; margin: 0 auto; padding: 16px 24px; }
   header .stripes { height: 8px; background: linear-gradient(90deg, var(--orange) 0 40%, var(--mustard) 40% 70%, var(--teal) 70% 88%, var(--avocado) 88%); }
   .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
-  .brand h1 { margin: 0; font-size: 28px; line-height: 1; font-weight: 700; letter-spacing: 1px; color: var(--walnut); }
+  @font-face { font-family: "TeddyClip Rounded"; src: url("/fonts/Fredoka.ttf") format("truetype");
+               font-weight: 300 700; font-display: swap; }
+  /* The wordmark: a heavy rounded face. Fredoka ships with the app when it is
+     there (teddyclip/fonts); Arial Rounded comes with Microsoft Office. */
+  .brand h1 { margin: 0; font-size: 34px; line-height: 1; font-weight: 600; letter-spacing: .2px; color: #4a2e1f;
+              font-family: "TeddyClip Rounded", "Arial Rounded MT Bold", "Nunito", "Century Gothic", sans-serif; }
   main { max-width: 1280px; margin: 0 auto; padding: 22px 24px 20px; }
   .raw-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 9px 0; border-top: 1px solid var(--line); }
   .raw-row:first-of-type { margin-top: 10px; }
@@ -138,16 +143,14 @@
 <header>
   <div class="bar">
     <div class="brand">
-      <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
-        <circle cx="20" cy="20" r="18" fill="#d4612a"/>
-        <g stroke="#d9a227" stroke-width="2.4" stroke-linecap="round">
-          <line x1="20" y1="4" x2="20" y2="11"/><line x1="20" y1="29" x2="20" y2="36"/>
-          <line x1="4" y1="20" x2="11" y2="20"/><line x1="29" y1="20" x2="36" y2="20"/>
-          <line x1="8.7" y1="8.7" x2="13.6" y2="13.6"/><line x1="26.4" y1="26.4" x2="31.3" y2="31.3"/>
-          <line x1="31.3" y1="8.7" x2="26.4" y2="13.6"/><line x1="13.6" y1="26.4" x2="8.7" y2="31.3"/>
-        </g>
-        <circle cx="20" cy="20" r="7.5" fill="#fff9ee"/>
-        <path d="M18 16.5 L24 20 L18 23.5 Z" fill="#2b7a74"/>
+      <svg class="bear" width="58" height="53" viewBox="0 0 48 44" aria-hidden="true">
+        <circle cx="10.5" cy="11" r="8.5" fill="#d4612a"/>
+        <circle cx="37.5" cy="11" r="8.5" fill="#d4612a"/>
+        <circle cx="10.5" cy="11" r="4.4" fill="#f0a35e"/>
+        <circle cx="37.5" cy="11" r="4.4" fill="#f0a35e"/>
+        <ellipse cx="24" cy="25.5" rx="18" ry="17" fill="#d4612a"/>
+        <circle cx="24" cy="28" r="9.6" fill="#fbf1e1"/>
+        <path d="M21.2 23.4 Q20.6 23 20.6 23.8 L20.6 32.2 Q20.6 33 21.2 32.6 L28.4 28.5 Q29 28 28.4 27.5 Z" fill="#4a2e1f"/>
       </svg>
       <h1>TeddyClip</h1>
     </div>
