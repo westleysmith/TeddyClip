@@ -94,7 +94,10 @@ def _default_ocr(img):
     if _engine is None:
         from rapidocr_onnxruntime import RapidOCR
 
-        _engine = RapidOCR()
+        # Banners are big text, so the text finder can work on a smaller image:
+        # capping its input at 480 px found the same YOU DIED screens on real
+        # footage at about twice the speed (its default enlarges images to 736).
+        _engine = RapidOCR(det_limit_side_len=480, det_limit_type="max")
     return _engine(img, use_cls=False)
 
 
@@ -105,7 +108,7 @@ def _center(img):
 
 
 def screen_events(video: Path, moments: list[Moment], lexicon: Lexicon, weight: float = 0.6,
-                  step: float = 2.0, max_frames: int = 160, ocr=None) -> list[Moment]:
+                  step: float = 3.0, max_frames: int = 100, ocr=None) -> list[Moment]:
     """Read the center of a frame every `step` seconds inside each moment (at most
     `max_frames` in all, strongest moments first). Lexicon hits are added to the
     moment's events once each, the first hit adds `10 * weight` to its score, and

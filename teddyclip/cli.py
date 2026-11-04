@@ -4,6 +4,7 @@ video, or check that everything TeddyClip needs is installed."""
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import shutil
 import time
@@ -168,6 +169,12 @@ def _mark_incomplete(out_dir: Path) -> Path | None:
     return target
 
 
+def clip_limit(duration: float, cfg: Config) -> int:
+    """How many picks a recording gets: clips_per_hour of it, at least 3 and
+    at most max_clips. "clip that" moments are kept on top of this."""
+    return min(cfg.max_clips, max(3, math.ceil(duration / 3600 * cfg.clips_per_hour)))
+
+
 def notes_file(cfg: Config, session: str) -> Path:
     """Where the moments.csv for a clip folder is kept."""
     return cfg.paths.notes / session / "moments.csv"
@@ -201,7 +208,9 @@ def process_recording(path: Path, cfg: Config) -> Path:
 
     print("Transcribing...")
     with progress.band(0.05, 0.60, "Transcribing what you said"):
-        segments = transcribe(wav16, cache, cfg.whisper_model, hotwords=cfg.triggers,
+        # No hotwords: priming Whisper with "clip that" made it hear "clip clip
+        # clip" in noisy game audio on a real recording, a fake trigger.
+        segments = transcribe(wav16, cache, cfg.whisper_model,
                               language=cfg.language, device=cfg.whisper_device, models=paths.models)
     release()  # frees the GPU before Ollama is asked anything
 
@@ -257,7 +266,7 @@ def process_recording(path: Path, cfg: Config) -> Path:
     with progress.band(0.83, 0.90, "Titling the moments"):
         moments = snapped(label(moments, segments, llm, load_prompt("label"), cfg.people))
         moments = rerank(moments, llm, load_prompt("rerank"))
-    moments = select(moments, info.duration, cfg.max_clips)
+    moments = select(moments, info.duration, clip_limit(info.duration, cfg))
 
     kept = sum(m.keep for m in moments)
     # Checked before anything is cut, so a full disk fails early and cleanly.

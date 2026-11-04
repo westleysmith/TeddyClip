@@ -20,6 +20,13 @@
   .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
   .brand h1 { margin: 0; font-size: 28px; line-height: 1; font-weight: 700; letter-spacing: 1px; color: var(--walnut); text-transform: lowercase; }
   main { max-width: 1280px; margin: 0 auto; padding: 22px 24px 20px; }
+  #shelf { text-align: center; margin-top: 4px; }
+  #shelf .panel { text-align: left; margin-top: 12px; }
+  button.linkish { border: none; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; padding: 4px; }
+  button.linkish:hover:not(:disabled) { transform: none; box-shadow: none; color: var(--walnut); }
+  .shelf-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .shelf-row:last-child { border-bottom: none; }
+  .shelf-row .spacer { flex: 1; }
   footer { text-align: center; padding: 8px 24px 26px; font-size: 12px; letter-spacing: .5px; color: var(--muted); opacity: .75; }
   button { font: inherit; border: 2px solid var(--walnut); background: var(--cream); color: var(--walnut);
            padding: 7px 18px; border-radius: 999px; cursor: pointer; font-weight: 600; letter-spacing: .3px;
@@ -125,6 +132,10 @@
     <details id="details"><summary>Show details</summary><pre class="log" id="log"></pre></details>
   </section>
   <div id="sessions"></div>
+  <section id="shelf" hidden>
+    <button class="linkish" id="shelf-toggle"></button>
+    <div id="shelf-list" class="panel" hidden></div>
+  </section>
 </main>
 <footer>Built by Westley Smith</footer>
 <div class="toast" id="toast"></div>
@@ -226,6 +237,20 @@ function clipCard(session, c) {
       </div></div>`;
 }
 
+let lastShelf = "";
+function renderShelf(archived) {
+  const key = JSON.stringify(archived);
+  if (key === lastShelf) return;
+  lastShelf = key;
+  $("shelf").hidden = !archived.length;
+  $("shelf-toggle").textContent = `${$("shelf-list").hidden ? "Show" : "Hide"} archived sessions (${archived.length})`;
+  $("shelf-list").innerHTML = archived.map((a) => `
+    <div class="shelf-row"><b>${esc(a.name)}</b><span class="muted">${a.clips} clip${a.clips === 1 ? "" : "s"}</span>
+      <span class="spacer"></span>
+      <button class="small" data-open="archived" data-session="${esc(a.name)}">Open folder</button>
+      <button class="small" data-restore="${esc(a.name)}">Restore</button></div>`).join("");
+}
+
 function renderSessions(sessions) {
   const key = JSON.stringify(sessions);
   if (key === lastSessions) return;  // re-drawing would restart any video that is playing
@@ -242,6 +267,7 @@ function renderSessions(sessions) {
         ${s.incomplete ? '<span class="badge k-trigger">did not finish</span>' : ""}
         <span class="spacer"></span>
         <button class="small" data-open="clips" data-session="${esc(s.name)}">Open folder</button>
+        <button class="small" data-archive="${esc(s.name)}" title="Put this session away. Nothing is deleted.">Archive</button>
         <button class="small" data-highlight="${esc(s.name)}" ${s.clips.length ? "" : "disabled"}>${s.highlight ? "Remake highlight" : "Make highlight"}</button>
       </div>
       ${s.highlight ? `<div class="highlight"><div class="muted" style="margin-bottom:6px">Highlight video
@@ -263,6 +289,7 @@ async function refresh() {
     renderInbox(st.inbox);
     renderJob(st.job);
     renderSessions(st.sessions);
+    renderShelf(st.archived || []);
     document.querySelectorAll("[data-highlight]").forEach((b) => (b.disabled = busy || b.dataset.empty === "1"));
   } catch (e) {
     toast("TeddyClip is not running. Open it again from the desktop shortcut.");
@@ -328,6 +355,13 @@ document.addEventListener("click", async (e) => {
     if (await post("/api/delete", {session: b.dataset.session, file: b.dataset.delete})) { lastSessions = ""; refresh(); }
   } else if (b.dataset.highlight) {
     if (await post("/api/highlight", {session: b.dataset.highlight})) refresh();
+  } else if (b.dataset.archive) {
+    if (await post("/api/archive", {session: b.dataset.archive})) { lastSessions = ""; lastShelf = ""; refresh(); }
+  } else if (b.dataset.restore) {
+    if (await post("/api/unarchive", {session: b.dataset.restore})) { lastSessions = ""; lastShelf = ""; refresh(); }
+  } else if (b.id === "shelf-toggle") {
+    $("shelf-list").hidden = !$("shelf-list").hidden;
+    lastShelf = ""; refresh();
   } else if (b.dataset.open) {
     post("/api/open", {folder: b.dataset.open, session: b.dataset.session});
   }

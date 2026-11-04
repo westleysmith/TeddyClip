@@ -272,3 +272,8 @@ def test_inbox_skips_an_mkv_that_obs_already_remuxed_to_mp4(cfg, monkeypatch, ca
     out = capsys.readouterr().out
     assert out.count("session.mkv") == 1 and "duplicate" in out
     assert (game / "session.mkv").exists()
+
+
+@pytest.mark.parametrize("seconds,expected", [(600, 3), (3600, 15), (4 * 3600, 40), (30, 3)])
+def test_clip_limit_scales_with_length(cfg, seconds, expected):
+    assert cli.clip_limit(seconds, cfg) == expected

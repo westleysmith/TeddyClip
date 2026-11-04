@@ -202,3 +202,26 @@ def test_other_web_pages_cannot_act(server):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req)
     assert e.value.code == 403
+
+
+def test_archive_puts_a_session_away_and_restore_brings_it_back(server, cfg, session):
+    assert post(server + "/api/archive", {"session": session.name})[0] == 200
+    st = json.loads(get(server + "/api/state")[2])
+    assert st["sessions"] == [] and st["archived"] == [{"name": session.name, "clips": 1}]
+    assert (cfg.paths.clips / "Archived" / session.name / "0h00m09s - Clip that - Boss fight.mp4").exists()
+    assert post(server + "/api/unarchive", {"session": session.name})[0] == 200
+    st = json.loads(get(server + "/api/state")[2])
+    assert [s["name"] for s in st["sessions"]] == [session.name] and st["archived"] == []
+
+
+def test_restoring_next_to_a_newer_session_of_the_same_name_keeps_both(server, cfg, session):
+    post(server + "/api/archive", {"session": session.name})
+    (cfg.paths.clips / session.name).mkdir()  # a newer session got the same name meanwhile
+    assert post(server + "/api/unarchive", {"session": session.name})[0] == 200
+    names = sorted(s["name"] for s in json.loads(get(server + "/api/state")[2])["sessions"])
+    assert names == [session.name, f"{session.name} (2)"]
+
+
+@pytest.mark.parametrize("body", [{"session": "Archived"}, {"session": ".."}, {"session": "missing"}, {}])
+def test_archive_rejects_bad_names(server, body):
+    assert post(server + "/api/archive", body)[0] in (400, 404)

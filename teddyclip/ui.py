@@ -24,6 +24,7 @@ from teddyclip import cli, progress
 from teddyclip.config import Config
 
 PAGE = Path(__file__).with_name("ui.html")
+ARCHIVE = "Archived"  # inside 2 - Clips: sessions put away from the main list
 PORT = 8765
 CHUNK = 1 << 20
 
@@ -263,7 +264,7 @@ def state(cfg: Config, job: Job) -> dict:
                 inbox.append({"name": str(p.relative_to(paths.inbox)), "ready": cli.is_finished(p)})
     sessions = []
     if paths.clips.is_dir():
-        folders = [d for d in paths.clips.iterdir() if d.is_dir()]
+        folders = [d for d in paths.clips.iterdir() if d.is_dir() and d.name != ARCHIVE]
         for folder in sorted(folders, key=lambda d: d.stat().st_mtime, reverse=True):
             notes = _clip_notes(cfg, folder)
             clips = []
@@ -278,7 +279,34 @@ def state(cfg: Config, job: Job) -> dict:
             sessions.append({"name": folder.name, "clips": clips,
                              "incomplete": "(incomplete" in folder.name,
                              "highlight": _media_url("highlights", highlight.name) if highlight.is_file() else None})
-    return {"inbox": inbox, "sessions": sessions, "games": _games(cfg, sessions), "job": job.state()}
+    archived = []
+    shelf = paths.clips / ARCHIVE
+    if shelf.is_dir():
+        for folder in sorted((d for d in shelf.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, reverse=True):
+            archived.append({"name": folder.name, "clips": sum(1 for _ in folder.glob("*.mp4"))})
+    return {"inbox": inbox, "sessions": sessions, "archived": archived,
+            "games": _games(cfg, sessions + archived), "job": job.state()}
+
+
+def _free_dir(path: Path) -> Path:
+    n, candidate = 2, path
+    while candidate.exists():
+        candidate = path.with_name(f"{path.name} ({n})")
+        n += 1
+    return candidate
+
+
+def archive_session(cfg: Config, name: str, back: bool = False) -> Path:
+    """Move a clip folder into 2 - Clips/Archived (or back out with back=True),
+    so finished sessions stop crowding the window. Nothing is deleted."""
+    shelf = cfg.paths.clips / ARCHIVE
+    src = (shelf if back else cfg.paths.clips) / name
+    if not src.is_dir():
+        raise FileNotFoundError(name)
+    dst = _free_dir((cfg.paths.clips if back else shelf) / name)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dst)
+    return dst
 
 
 def make_handler(cfg: Config, job: Job):
@@ -406,6 +434,18 @@ def make_handler(cfg: Config, job: Job):
                                  lambda: cli.highlight(cfg.paths.clips / session, cfg)):
                     return self._error(HTTPStatus.CONFLICT, "TeddyClip is already busy")
                 return self._json({"ok": True})
+            if path in ("/api/archive", "/api/unarchive"):
+                session = _plain_name(data.get("session"))
+                if session is None or session == ARCHIVE:
+                    return self._error(HTTPStatus.BAD_REQUEST, "no such clip folder")
+                try:
+                    archive_session(cfg, session, back=path == "/api/unarchive")
+                except FileNotFoundError:
+                    return self._error(HTTPStatus.NOT_FOUND, "that clip folder is gone")
+                except OSError as e:
+                    return self._error(HTTPStatus.INTERNAL_SERVER_ERROR,
+                                       f"Could not move it (is a clip open somewhere?): {e}")
+                return self._json({"ok": True})
             if path == "/api/delete":
                 session, file = _plain_name(data.get("session")), _plain_name(data.get("file"))
                 if session is None or file is None or not file.lower().endswith(".mp4"):
@@ -420,6 +460,7 @@ def make_handler(cfg: Config, job: Job):
                 return self._json({"ok": True})
             if path == "/api/open":
                 folders = {"inbox": cfg.paths.inbox, "clips": cfg.paths.clips,
+                           "archived": cfg.paths.clips / ARCHIVE,
                            "highlights": cfg.paths.highlights, "done": cfg.paths.done}
                 folder = folders.get(data.get("folder"))
                 if folder is None:

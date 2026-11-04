@@ -88,6 +88,7 @@ class Config:
     min_seconds: float = 20
     max_seconds: float = 120
     max_clips: int = 40
+    clips_per_hour: float = 15
     pre_trigger_seconds: float = 45
     weights: dict[str, float] = field(default_factory=_default_weights)
     games: dict[str, str] = field(default_factory=_default_games)
@@ -123,6 +124,7 @@ _FLAT_KEYS: dict[str, tuple[str | None, str]] = {
     "min_seconds": ("clips", "min_seconds"),
     "max_seconds": ("clips", "max_seconds"),
     "max_clips": ("clips", "max_clips"),
+    "clips_per_hour": ("clips", "per_hour"),
     "pre_trigger_seconds": ("clips", "pre_trigger_seconds"),
     "weights": (None, "weights"),
     "games": (None, "games"),

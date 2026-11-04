@@ -11,7 +11,8 @@ llm:
 clips:
   min_seconds: 20
   max_seconds: 120
-  max_clips: 40
+  max_clips: 40                    # most clips from one recording
+  per_hour: 15                     # picks per hour of recording, so short sessions get a few good ones (clip that moments always count extra)
   pre_trigger_seconds: 45
 weights: {laughter: 1.0, joke_sweep: 0.7, loudness: 0.6, voice_jump: 0.6, screen_text: 0.6}
 games:
