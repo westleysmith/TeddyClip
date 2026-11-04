@@ -72,8 +72,11 @@ def run(wav: Path, models: Path, out_dir: Path, language: str | None = "en") -> 
             progress.step(fraction)
             print(f"\r  Transcribed {fraction:4.0%}", end="", flush=True)
     print()
-    if proc.wait() != 0:
-        raise RuntimeError("whisper.cpp could not transcribe the audio:\n" + "\n".join(tail[-6:]))
+    code = proc.wait()
+    if code != 0:
+        # Windows crash codes are large negatives; hex is how they are looked up.
+        shown = f"0x{code & 0xFFFFFFFF:08X}" if code < 0 else str(code)
+        raise RuntimeError(f"whisper.cpp stopped with exit code {shown}. Last output:\n" + "\n".join(tail[-6:]))
     data = json.loads((base.with_suffix(".json")).read_text(encoding="utf-8"))
     return data.get("transcription", []), device
 

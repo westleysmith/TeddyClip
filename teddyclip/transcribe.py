@@ -359,7 +359,11 @@ def transcribe(
             _write_cache(cache_path, segments)
             return segments
         except Exception as e:  # a driver or engine problem: the CPU still works
-            print(f"\n  Whisper: the graphics card failed ({str(e)[:160]}); transcribing on the CPU instead")
+            # The first line says why; the full output goes to the log under Show details.
+            first, _, rest = str(e).partition("\n")
+            print(f"\n  Whisper: the graphics card failed ({first}); transcribing on the CPU instead")
+            if rest:
+                print("  " + rest.replace("\n", "\n  "))
             device = "cpu"
 
     print(f"  Loading whisper model '{model}'...")
