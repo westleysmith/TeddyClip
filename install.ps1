@@ -94,7 +94,24 @@ if (-not $SkipPrograms) {
     if (-not (Find-Python312)) { Install-Program 'Python.Python.3.12' 'Python 3.12' @('--scope', 'user') }
     else { Write-Host "Python 3.12 is already installed." }
     Install-Program 'Gyan.FFmpeg' 'FFmpeg'
-    Install-Program 'Ollama.Ollama' 'Ollama'
+    # winget can still list Ollama after it was removed, so look for the
+    # program itself; reinstall with winget, or Ollama's own installer.
+    if (Find-Ollama) { Write-Host "Ollama is already installed." }
+    else {
+        Write-Host "Installing Ollama (this can take a few minutes)..."
+        winget install --id Ollama.Ollama --exact --silent --force --accept-source-agreements --accept-package-agreements
+        Refresh-Path
+        if (-not (Find-Ollama)) {
+            try {
+                $setup = Join-Path $env:TEMP 'OllamaSetup.exe'
+                Invoke-WebRequest 'https://ollama.com/download/OllamaSetup.exe' -OutFile $setup -UseBasicParsing -ErrorAction Stop
+                Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+                Remove-Item $setup -Force -ErrorAction SilentlyContinue
+                Refresh-Path
+            } catch { Write-Host "Could not download Ollama ($($_.Exception.Message))." -ForegroundColor Yellow }
+        }
+        if (-not (Find-Ollama)) { Write-Host "Ollama could not be installed, so AI titles will be off. TeddyClip still works." -ForegroundColor Yellow }
+    }
 } else {
     Say "Step 1 of 7: skipped installing programs"
 }
