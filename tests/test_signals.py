@@ -99,20 +99,61 @@ def test_peak_windows_clamp_and_spacing():
     wins = peak_windows(s, percentile=90)
     assert wins[0][0] == 0 and len(wins) == 2
     assert wins[0][3] == 5.0
-    assert wins[1] == (130.0, 165.0, 1.0, 150.0)
+    assert wins[1] == (110.0, 165.0, 1.0, 150.0)  # 40 s of lead-in, 15 after
 
 
 def test_peak_windows_clamps_end_and_needs_a_positive_peak():
     s = np.zeros(100)
     s[95] = 1
-    assert peak_windows(s) == [(75.0, 100.0, 1.0, 95.0)]
+    assert peak_windows(s) == [(55.0, 100.0, 1.0, 95.0)]
     assert peak_windows(np.zeros(100)) == []
 
 
-def test_voice_jump_flags_sudden_loud():
+def test_a_calm_video_does_not_get_its_calmest_peaks_clipped():
+    s = np.zeros(300)
+    s[50], s[200] = 0.2, 0.9  # a mild bump and a real moment
+    assert [w[3] for w in peak_windows(s)] == [200.0]
+
+
+def test_voice_jump_flags_an_outburst():
     x = np.full(200, 0.1)
-    x[100] = 0.35
-    assert voice_jump(x)[100] > 0.5 and voice_jump(x)[50] == 0
+    x[100:104] = 0.35  # a few seconds of yelling
+    assert voice_jump(x)[101] > 0.5 and voice_jump(x)[50] == 0
+
+
+def test_voice_jump_ignores_one_stressed_word():
+    x = np.full(200, 0.1)
+    x[100] = 0.35  # one loud second, then back to normal talking
+    assert voice_jump(x).max() < 0.2
+
+
+def test_a_loud_game_sound_with_nobody_talking_is_not_a_voice_jump():
+    from teddyclip.signals import talking_seconds
+    from teddyclip.transcribe import Word
+
+    x = np.full(200, 0.1)
+    x[50:54] = 0.4    # an explosion, nobody says anything
+    x[150:154] = 0.4  # someone yelling
+    words = [Word(float(t) + 0.1, float(t) + 0.8, "w") for t in range(0, 200, 2) if not 46 <= t <= 58]
+    words += [Word(150.0, 154.0, "NOOO")]
+    vj = voice_jump(x, talking_seconds(words, 200))
+    assert vj[50:54].max() == 0 and vj[151] > 0.5
+
+
+def test_talking_seconds_marks_every_second_a_word_covers():
+    from teddyclip.signals import talking_seconds
+    from teddyclip.transcribe import Word
+
+    assert talking_seconds([Word(1.2, 3.5, "hey"), Word(9.5, 12.0, "past the end")], 10).tolist() == \
+        [False, True, True, True, False, False, False, False, False, True]
+
+
+def test_absolute_signals_are_not_ranked_within_the_video():
+    calm = np.full(100, 0.05)
+    calm[10] = 0.1  # the "loudest" second of a calm video
+    ranked = contributions({"v": calm}, {"v": 1.0})["v"]
+    fixed = contributions({"v": calm}, {"v": 1.0}, absolute={"v"})["v"]
+    assert ranked[10] == pytest.approx(1.0) and fixed[10] == pytest.approx(0.1)
 
 
 def test_voice_jump_empty():

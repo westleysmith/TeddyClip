@@ -45,9 +45,9 @@ from teddyclip.signals import (
     contributions,
     find_triggers,
     fuse,
-    pct,
     peak_windows,
     people_sounds,
+    talking_seconds,
     voice_jump,
 )
 from teddyclip.transcribe import all_words, pick_engine, release, transcribe
@@ -220,7 +220,8 @@ def process_recording(path: Path, cfg: Config) -> Path:
     print("Measuring loudness...")
     with progress.band(0.60, 0.62, "Measuring loudness"):
         features = audio_features(wav16)
-        jumps = voice_jump(features["loudness"])
+        loudness = features["loudness"]
+        jumps = voice_jump(loudness, talking_seconds(all_words(segments), loudness.size))
     print("Listening for laughter and shouts...")
     with progress.band(0.62, 0.70, "Listening for laughter"):
         people = people_sounds(wav32, Tagger(*ensure_assets(paths.models)))
@@ -235,11 +236,15 @@ def process_recording(path: Path, cfg: Config) -> Path:
     with progress.band(0.70, 0.78, "Looking for jokes"):
         jokes = sweep(segments, llm, load_prompt("sweep"))
 
-    spike = pct(features["spike"])
-    fusing = {"laughter": laughter, "joke_sweep": jokes, "loudness": _highest(spike, pct(shout)), "voice_jump": jumps}
-    fused = fuse(fusing, cfg.weights)
+    # "loudness" is people shouting or screaming, as the sound tagger hears it.
+    # Plain volume is left out: it mostly follows the game (explosions, music),
+    # and a voice getting loud is already voice_jump. Both are on a fixed 0..1
+    # scale, so a calm video does not get its loudest seconds called exciting.
+    fusing = {"laughter": laughter, "joke_sweep": jokes, "loudness": shout, "voice_jump": jumps}
+    absolute = {"loudness", "voice_jump"}
+    fused = fuse(fusing, cfg.weights, absolute)
     # What each signal added to the fused score, to name the kind of each peak.
-    parts = contributions(fusing, cfg.weights)
+    parts = contributions(fusing, cfg.weights, absolute)
     triggers = find_triggers(all_words(segments), cfg.triggers)
     if triggers:
         print(f"Heard \"clip that\" {_count(len(triggers), 'time')}")

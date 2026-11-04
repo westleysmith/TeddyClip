@@ -99,18 +99,18 @@ recording
 | Trigger | Word-level match of trigger phrases ("clip that", "clip it", "clip this", configurable) over transcript words, lowercase and punctuation stripped. The first word may be a close misspelling (difflib ratio at least 0.8, not an inflection such as "clips"), plus the one known mishear "clipped" before a "th" word ("clipped that"); every later word must match exactly. Consecutive words are at most 1 s apart, and no word but the last may end a sentence (. ! ?), so "...a clip. That was..." does not fire; a comma is fine. Repeats within 5 s collapse. Time = phrase start | Ours |
 | Marker | OBS chapter markers from the file | Ours |
 | Laughter / shouting | PANNs AudioSet tagger, 2 s window each second; Laughter, Belly laugh, Giggle, Chuckle, Snicker groups and a Scream/Shout/Yell group; each scored against its own rolling 90 s median | Clips Kitty `panns.py`, `game_audio.py` |
-| Loudness, spike, burst | RMS per second, ratio to rolling 30 s median, onset density | Clips Kitty `audio_features.py` |
-| Voice jump | A laugh or shout 2 to 3.5x the speaker's own level over +/-60 s | Clips Kitty `fusion._voice_jump` |
+| Loudness | The Scream/Shout/Yell group above. Plain volume (RMS spike) is computed but not fused: on real footage it mostly followed game sounds | Clips Kitty `audio_features.py` |
+| Voice jump | The voice averaged over 3 s, 2 to 3.5x the speaker's own level over +/-60 s, so it takes an outburst rather than one stressed word. Only seconds with transcribed words count, and the usual level is measured over those seconds only, so a game sound with nobody talking is not a jump | Clips Kitty `fusion._voice_jump` |
 | Joke sweep | Local model score per 2 minute transcript slice (30 s overlap), spread over its seconds | Ours, prompt adapted from Clips Kitty `score_clips.txt` |
 | Screen text | OCR event hits (e.g. YOU DIED) | Clips Kitty `game_text.py` |
 
-**Fusion:** each signal is percentile-normalized within the video, weighted (weights in `config.yaml`), and combined with a soft OR (1 minus the product of misses), following Clips Kitty's `_pct` and `_soft_or`. Peaks above a percentile become candidate windows.
+**Fusion:** laughter and the joke sweep are percentile-normalized within the video; loudness and voice jump keep their fixed 0..1 scale, so the loudest seconds of a calm video are not called exciting. Each is weighted (weights in `config.yaml`) and combined with a soft OR (1 minus the product of misses), following Clips Kitty's `_pct` and `_soft_or`. Peaks above the 92nd percentile and above 0.3 become candidate windows, so a calm video gives fewer clips.
 
 **Audio track:** if `audio_track` is set (their mics recorded separately in OBS), that track is used for transcription and people-sound signals; clips always use the full mix (track 1).
 
 ### 4.2 Candidate windows
 - **Trigger or OBS marker:** window = [t - 45 s, t - 0.3 s], ending just before the phrase so "clip that" is not in the clip. Always kept, never dropped by scoring or caps.
-- **Signal peak:** window from 20 s before to 15 s after the peak, expanded to sentence boundaries from the transcript.
+- **Signal peak:** window from 40 s before to 15 s after the peak, expanded to sentence boundaries from the transcript. The lead-in is long because a laugh comes after its setup: on test footage the setup began about 40 s before the laugh the tagger heard.
 - **Screen events:** OCR runs only inside candidate windows, sampling a frame every 2 s, because scanning a whole 4 hour video on CPU is too slow. A hit (e.g. YOU DIED) is attached to the window and raises its score by the `screen_text` weight.
 - Overlapping windows merge. When a "clip that" window merges with a nearby signal moment, the merged clip still ends before the phrase (at the latest forced end), so the trigger words are never in the clip. Forced windows are also never dropped or lengthened for being shorter than the minimum length. Duplicates are removed with Clips Kitty's three checks (time overlap over 40 percent, transcript text similarity over 70 percent, shared segments over 40 percent).
 - Lengths are clamped to 20 s to 120 s (configurable).

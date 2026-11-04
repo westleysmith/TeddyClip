@@ -28,6 +28,13 @@ from teddyclip.transcribe import Word
 SAMPLE_RATE = 16000
 FRAME = SAMPLE_RATE // 20  # 50 ms analysis frames
 SPIKE_HALF_WINDOW = 15  # seconds either side for the spike baseline
+# A real outburst lasts a few seconds; one stressed word does not. Tested on a
+# 10 minute Let's Play: per second, 70 seconds counted as "loud"; averaged over
+# 3 seconds, the strongest left was the actual reaction to a punchline.
+SUSTAIN_SECONDS = 3
+LEAD_IN_SECONDS = 40  # before a peak: a laugh comes after its setup, often half a minute after
+FOLLOW_SECONDS = 15   # after a peak
+MIN_PEAK = 0.3        # a fused score below this is not exciting, however this video ranks it
 TRIGGER_GAP = 5.0  # seconds; a repeat of a trigger this close to the last is dropped
 
 _FEATURES = ("loudness", "spike", "burst", "noisiness")
@@ -95,19 +102,40 @@ def _rolling_median(x: np.ndarray, half: int) -> np.ndarray:
     return np.median(sliding_window_view(padded, 2 * half + 1), axis=1).astype(np.float32)
 
 
-def voice_jump(loudness: np.ndarray) -> np.ndarray:
+def talking_seconds(words: list[Word], n: int) -> np.ndarray:
+    """True for each of `n` seconds in which a transcribed word is being said."""
+    talking = np.zeros(n, dtype=bool)
+    for w in words:
+        first = max(0, int(w.start))
+        last = min(n - 1, max(first, int(np.ceil(w.end)) - 1))
+        if first < n:
+            talking[first:last + 1] = True
+    return talking
+
+
+def voice_jump(loudness: np.ndarray, talking: np.ndarray | None = None) -> np.ndarray:
     """Seconds where the player suddenly gets loud: a shout, a laugh, a scream.
     0..1 per second.
 
-    Measured against their own audible level over the minute either side, not
+    Loudness is first averaged over SUSTAIN_SECONDS, so it takes an outburst,
+    not one stressed word or a single bang. With `talking` (see
+    `talking_seconds`) only seconds where someone is saying words count, and
+    their usual level is measured over talking seconds only, as Clips Kitty's
+    `_voice_jump` does: an explosion with nobody talking is the game, not
+    them. Measured against their own level over the minute either side, not
     the recording's overall level, so a quiet stretch does not make ordinary
     talking read as a shout. Twice that level starts to count; 3.5x is a full
     shout. Silent seconds never count."""
-    loud = np.asarray(loudness, dtype=np.float32)
-    n = loud.size
+    raw = np.asarray(loudness, dtype=np.float32)
+    n = raw.size
     if n == 0:
         return np.zeros(0, dtype=np.float32)
+    width = min(SUSTAIN_SECONDS, n)
+    loud = np.convolve(raw, np.ones(width, dtype=np.float32) / width, mode="same").astype(np.float32)
     audible = loud > max(float(loud.mean()) * 0.3, 1e-4)
+    if talking is not None:
+        audible &= np.asarray(talking, dtype=bool)[:n] if len(talking) >= n else np.pad(
+            np.asarray(talking, dtype=bool), (0, n - len(talking)))
     if not audible.any():
         return np.zeros(n, dtype=np.float32)
     level = np.full(n, float(np.median(loud[audible])), dtype=np.float32)
@@ -202,12 +230,19 @@ def pct(x: np.ndarray) -> np.ndarray:
     return (ranks / max(x.size - 1, 1)).astype(np.float32)
 
 
-def contributions(signals: dict[str, np.ndarray], weights: dict[str, float]) -> dict[str, np.ndarray]:
+def contributions(signals: dict[str, np.ndarray], weights: dict[str, float],
+                  absolute: frozenset[str] | set[str] = frozenset()) -> dict[str, np.ndarray]:
     """Each signal's share of the fused score, per second: its percentile rank
-    times its weight (clipped to 0..1). Every array is padded with zeros to the
-    longest; a signal without a weight is all zeros. These are exactly the
-    quantities `fuse` combines, so they also say which signal made a peak."""
-    parts = {name: np.clip(pct(sig), 0.0, 1.0) * float(np.clip(weights.get(name, 0.0), 0.0, 1.0))
+    times its weight (clipped to 0..1). Signals named in `absolute` are already
+    0..1 on a fixed scale and are used as they are: ranking them within the
+    video would make the loudest few seconds of even a calm video count as a
+    shout. Every array is padded with zeros to the longest; a signal without a
+    weight is all zeros. These are exactly the quantities `fuse` combines, so
+    they also say which signal made a peak."""
+    def level(name: str, sig: np.ndarray) -> np.ndarray:
+        return np.asarray(sig, dtype=np.float32) if name in absolute else pct(sig)
+
+    parts = {name: np.clip(level(name, sig), 0.0, 1.0) * float(np.clip(weights.get(name, 0.0), 0.0, 1.0))
              for name, sig in signals.items()}
     n = max((p.size for p in parts.values()), default=0)
     out = {}
@@ -218,11 +253,12 @@ def contributions(signals: dict[str, np.ndarray], weights: dict[str, float]) -> 
     return out
 
 
-def fuse(signals: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarray:
+def fuse(signals: dict[str, np.ndarray], weights: dict[str, float],
+         absolute: frozenset[str] | set[str] = frozenset()) -> np.ndarray:
     """One 0..1 score per second: the soft OR, 1 - product(1 - c), of every
     signal's contribution c (see `contributions`). Agreement raises it; a
     missing signal (an empty array) is simply absent, never a penalty."""
-    parts = contributions(signals, weights)
+    parts = contributions(signals, weights, absolute)
     if not parts or not next(iter(parts.values())).size:
         return np.zeros(0, dtype=np.float32)
     miss = np.ones(next(iter(parts.values())).size, dtype=np.float32)
@@ -234,17 +270,21 @@ def fuse(signals: dict[str, np.ndarray], weights: dict[str, float]) -> np.ndarra
 def peak_windows(
     score: np.ndarray,
     percentile: float = 92,
-    pre: float = 20,
-    post: float = 15,
+    pre: float = LEAD_IN_SECONDS,
+    post: float = FOLLOW_SECONDS,
+    floor: float = MIN_PEAK,
 ) -> list[tuple[float, float, float, float]]:
     """(start, end, peak score, peak second) of the window around each strong
-    peak, in time order. A peak must be above the percentile value and above 0;
-    peaks are at least `pre + post` seconds apart (the higher one wins), so no
-    two windows overlap. Windows are clamped to the video: 0 to len(score)."""
+    peak, in time order. A peak must be above the percentile value and above
+    `floor`, so a calm video gives fewer clips instead of its least calm
+    seconds. Peaks are at least `pre + post` seconds apart (the higher one
+    wins), so no two windows overlap. The window reaches `pre` seconds back
+    because the peak (a laugh, a shout) comes after what caused it. Windows are
+    clamped to the video: 0 to len(score)."""
     score = np.asarray(score, dtype=np.float32)
     if score.size == 0:
         return []
-    cutoff = max(float(np.percentile(score, percentile)), 0.0)
+    cutoff = max(float(np.percentile(score, percentile)), floor, 0.0)
     hot = np.flatnonzero(score > cutoff)
     # Strongest first; a stable sort keeps the earlier second on ties.
     hot = hot[np.argsort(-score[hot], kind="stable")]

@@ -12,7 +12,7 @@ TeddyClip is a personal auto-clipper for long gaming recordings with commentary.
 2. **Find signals** across the whole video:
    - Say **"clip that"** out loud during a session and that moment is always included. The clip ends just before you say it.
    - Optional [OBS](https://obsproject.com/) chapter-marker hotkey as a clip button.
-   - Loudness spikes, bursts of shouting or laughing, and quiet-then-loud reactions.
+   - Laughing, shouting, and outbursts where your voice stays loud for a few seconds. Each clip reaches back about 40 seconds so it includes the setup, not just the reaction.
    - Optional per-game screen detectors (for example a "YOU DIED" screen), chosen by the game folder name.
 3. **Pick moments** with a small local AI model (via Ollama) that finds quiet jokes in the transcript and titles each moment. No cloud, no cost. If Ollama is not running, TeddyClip carries on without AI titles.
 4. **Cut clips** named by timestamp and what happened, write a `moments.csv` and a DaVinci Resolve marker file, then move the original recording to `Done` with chapters added.
